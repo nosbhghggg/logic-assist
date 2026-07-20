@@ -7,5 +7,6 @@
     "version": "0.1.0",
     "minGameVersion": "157.1",
     "hidden": true,
+    "hideBrowser": false,
     "java": false
 }
