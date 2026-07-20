@@ -1,0 +1,11 @@
+{
+    "name": "jump-line-color",
+    "displayName": "Jump Line Color",
+    "author": "VT4JIGMQG",
+    "description": "Colors jump lines in the logic editor by their target destination. Supports index mode and block color mode.",
+    "subtitle": "Color jump lines by target",
+    "version": "0.1.0",
+    "minGameVersion": "157.1",
+    "hidden": true,
+    "java": false
+}

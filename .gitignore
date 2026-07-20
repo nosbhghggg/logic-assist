@@ -1,0 +1,19 @@
+# IDE
+.idea/
+.vscode/
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Build artifacts
+*.jar
+build/
+out/
+
+# Temp
+*.tmp
+*~
+# Windows
+desktop.ini
