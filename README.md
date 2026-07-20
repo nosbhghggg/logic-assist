@@ -25,7 +25,7 @@ Place the folder in Mindustry's mods directory:
 ## Compatibility
 
 - Min game version: 157.1
-- Multiplayer compatible: Yes (client-side UI only)
+- Multiplayer compatible: Yes
 - Languages: English / 中文
 
 ## How It Works
