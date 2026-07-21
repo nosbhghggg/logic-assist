@@ -746,15 +746,17 @@ public class BoxSelect{
     private static void redrawSelectedBlocksOnTop(LCanvas canvas){
         if(selected.isEmpty()) return;
 
-        // 保存当前 batch transform
-        Mat oldTrans = Draw.trans();
+        // 保存当前 batch transform 的副本（Draw.trans() 返回的是内部引用，必须 copy！）
+        // 之前的 bug：oldTrans = Draw.trans() 只保存了引用，Draw.trans(dragLayoutTrans)
+        // 覆盖了内部矩阵后 oldTrans 也跟着变了，导致恢复时设置的是错误的值，
+        // 后续所有渲染（包括背景）都用了错误的 transform → 整个编辑器背景歪了
+        Mat oldTrans = new Mat().set(Draw.trans());
 
-        // 计算 DragLayout 的 transform 矩阵（只有平移）
-        // DragLayout 在 pane 内，pane 可能有偏移，所以用 localToStageCoordinates 计算
+        // 计算 DragLayout 的 transform 矩阵（只有平移，无旋转/缩放）
         Vec2 origin = canvas.statements.localToStageCoordinates(Tmp.v1.set(0, 0));
-        Mat dragLayoutTrans = new Mat(); // 单位矩阵
+        Mat dragLayoutTrans = new Mat();
         dragLayoutTrans.idt();
-        dragLayoutTrans.translate(origin.x, origin.y);
+        dragLayoutTrans.setToTranslation(origin.x, origin.y);
         Draw.trans(dragLayoutTrans);
 
         // 在 DragLayout transform 内重画选中积木
@@ -765,7 +767,7 @@ public class BoxSelect{
         Draw.reset();
         for(StatementElem elem : selected){
             boolean oldCullable = elem.cullable;
-            elem.cullable = false; // 防止被裁剪掉
+            elem.cullable = false;
             elem.x += elem.translation.x;
             elem.y += elem.translation.y;
             elem.draw();
@@ -775,7 +777,7 @@ public class BoxSelect{
         }
         Draw.reset();
 
-        // 恢复 batch transform
+        // 恢复 batch transform（用副本，确保恢复的是原始值）
         Draw.trans(oldTrans);
     }
 
