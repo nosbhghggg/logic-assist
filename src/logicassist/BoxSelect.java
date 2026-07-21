@@ -65,6 +65,10 @@ public class BoxSelect{
     }
     private static State state = State.IDLE;
 
+    // 拖拽模式：移动或复制（替代 Ctrl 键，支持移动端）
+    private enum DragMode{ MOVE, COPY }
+    private static DragMode dragMode = DragMode.MOVE;
+
     // 鼠标轮询状态
     private static boolean prevMouseDown = false;
     private static boolean mousePressed = false;
@@ -200,7 +204,14 @@ public class BoxSelect{
         // 在 SELECTED 状态下持续保存 children 顺序（跳过 justPressed 帧），
         // 确保拖动开始时保存的是原版 InputListener toFront() 之前的正确顺序
         if(state == State.SELECTED && !justPressed){
-            saveChildrenOrder(canvas);
+            // 检测选中积木是否被删除（parent 为 null 说明已从 children 移除）
+            // 使用迭代器安全移除
+            selected.removeIf(elem -> elem.parent != canvas.statements);
+            if(selected.isEmpty()){
+                clearSelection();
+            }else{
+                saveChildrenOrder(canvas);
+            }
         }
 
         // 鼠标 stage 坐标
@@ -223,9 +234,13 @@ public class BoxSelect{
             // 每帧 invalidate + validate 强制重新 layout（重置所有位置，防止 applyInsertShift 累积）
             canvas.statements.invalidate();
             canvas.statements.validate();
-            // 手动重新布局非选中积木（跳过选中积木，模拟原版 dragging 跳过逻辑）
-            // 因为 validate 把选中积木也布局了，导致非选中积木的 y 偏高
-            relayoutNonSelected(canvas);
+
+            // 移动模式：跳过选中积木布局（它们用 translation 跟随鼠标，不占原位）
+            // 复制模式：选中积木（原积木）正常布局（留在原位），不跳过
+            if(state == State.DRAGGING_MOVE){
+                relayoutNonSelected(canvas);
+            }
+            // DRAGGING_COPY 不调用 relayoutNonSelected，原积木保持 validate() 后的位置
 
             // 用 DragLayout 本地坐标系计算 dx/dy，这样滚动 pane 时偏移自动补偿
             // 原版 InputListener 用 localToParentCoordinates 增量计算 translation，原理相同：
@@ -234,10 +249,16 @@ public class BoxSelect{
             float dx = localMouse.x - dragStartLocalX;
             float dy = localMouse.y - dragStartLocalY;
 
-            // 所有选中积木设置 translation 跟随鼠标
-            for(StatementElem elem : selected){
-                elem.setTranslation(dx, dy);
+            // 移动模式：选中积木跟随鼠标（translation）
+            // 复制模式：原积木保持原位（不设置 translation），只有插入指示器跟随鼠标
+            // 之前复制模式也设置了 translation，导致原积木从原位消失（"隐藏"），
+            // 直到松手插入副本后才重新出现
+            if(state == State.DRAGGING_MOVE){
+                for(StatementElem elem : selected){
+                    elem.setTranslation(dx, dy);
+                }
             }
+            // DRAGGING_COPY 不设置 translation，原积木留在原位
 
             // 计算插入位置（只遍历非选中积木，返回非选中积木列表中的索引）
             int newInsertPos = computeInsertPosition(canvas, my);
@@ -291,8 +312,9 @@ public class BoxSelect{
                 clearDraggingField(canvas);
                 // savedChildrenOrder 已在 SELECTED 状态下持续保存，无需在此重复保存
 
-                if(ctrlDown){
-                    // Ctrl+拖动 = 复制
+                // 根据 dragMode 决定移动还是复制（Ctrl 键仍然可用，优先级高于 dragMode）
+                if(ctrlDown || dragMode == DragMode.COPY){
+                    // 复制模式
                     prepareCopyData(canvas);
                     state = State.DRAGGING_COPY;
                 }else{
@@ -564,13 +586,14 @@ public class BoxSelect{
                 drawHighlights(canvas);
                 break;
             case DRAGGING_MOVE:
-            case DRAGGING_COPY:
-                // 先画插入指示器（阴影），再在正确的 transform 矩阵内重画选中积木。
-                // 原版 DragLayout.draw() 的顺序是：先画阴影，再 super.draw() 画积木，
-                // 所以积木在阴影上方。但我们的 overlay 在 dialog 之后绘制（最上层），
-                // 所以先画阴影，再重画积木，确保积木在阴影上方。
+                // 移动模式：先画插入指示器（阴影），再重画选中积木在阴影上方
                 drawInsertIndicator(canvas);
                 redrawSelectedBlocksOnTop(canvas);
+                break;
+            case DRAGGING_COPY:
+                // 复制模式：原积木在原位不动，只画插入指示器
+                // 不调用 redrawSelectedBlocksOnTop（原积木已由 DragLayout.draw 正常绘制）
+                drawInsertIndicator(canvas);
                 break;
             default:
                 break;
@@ -785,12 +808,27 @@ public class BoxSelect{
     // 浮动工具栏
     // ==================================================================
 
+    /** 显示选中后的模式切换按钮（替代原取消按钮）
+     *  两个按钮：
+     *  - 模式切换（移动/复制）：点击切换 dragMode，按钮文字显示当前模式
+     *  - 取消选中：清空选中状态 */
     private static void showToolbar(LCanvas canvas){
         hideToolbar();
         toolbar = new Table(Tex.buttonTrans);
         toolbar.margin(6);
-        toolbar.defaults().size(80, 34).padRight(4);
+        toolbar.defaults().size(90, 34).padRight(4);
+
+        // 模式切换按钮（动态更新文字和图标）
+        TextButton modeBtn = new TextButton(dragMode == DragMode.MOVE ? "@la.move" : "@la.copy");
+        modeBtn.clicked(() -> {
+            dragMode = (dragMode == DragMode.MOVE) ? DragMode.COPY : DragMode.MOVE;
+            modeBtn.setText(dragMode == DragMode.MOVE ? "@la.move" : "@la.copy");
+        });
+        toolbar.add(modeBtn);
+
+        // 取消选中按钮
         toolbar.button("@la.cancel", Icon.cancel, () -> clearSelection());
+
         toolbar.pack();
         canvas.addChild(toolbar);
         toolbar.toFront();
