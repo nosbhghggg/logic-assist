@@ -4,6 +4,7 @@ import arc.*;
 import arc.graphics.*;
 import arc.graphics.g2d.*;
 import arc.input.*;
+import arc.math.*;
 import arc.math.geom.*;
 import arc.scene.*;
 import arc.scene.event.*;
@@ -40,6 +41,18 @@ import java.util.*;
  *   4. 松手 → 积木移动到新位置
  *   5. Ctrl+拖动 → 复制模式（原积木保留）
  *   6. 右键/Esc → 取消拖动
+ *
+ * ------------------------------------------------------------
+ * 致谢 / Acknowledgements
+ * ------------------------------------------------------------
+ * 本文件的"拖动移动"和"跳转索引转换"逻辑参考了 MI2-Utilities 项目：
+ *   - 项目地址: https://github.com/anomaly-251/MI2-Utilities-Java
+ *   - 参考文件: src/mi2u/ui/LogicHelperMindow.java
+ *   - 参考方法: doCutPaste() — 直接移动 StatementElem 对象（elem.remove() + addChildAt()）
+ *               而非 save/read 重建，从而保留 JumpStatement.dest 引用
+ *   - 参考方法: doCutPaste() 的 transJump 部分 — 移动后重新计算 JumpStatement.destIndex
+ *
+ * 代码中标记 [MI2-Utilities] 的注释处即为参考该项目的实现。
  */
 public class BoxSelect{
 
@@ -66,6 +79,8 @@ public class BoxSelect{
 
     // 拖动状态
     private static float dragStartMouseX, dragStartMouseY;
+    // 鼠标在 DragLayout 本地坐标系中的起始位置（用于计算 translation，自动补偿滚动偏移）
+    private static float dragStartLocalX, dragStartLocalY;
     private static int dragInsertPos = -1;
 
     // 插入指示器几何位置（act 阶段计算，draw 阶段使用，避免 toFront 后 children 顺序不一致）
@@ -212,8 +227,12 @@ public class BoxSelect{
             // 因为 validate 把选中积木也布局了，导致非选中积木的 y 偏高
             relayoutNonSelected(canvas);
 
-            float dx = mx - dragStartMouseX;
-            float dy = my - dragStartMouseY;
+            // 用 DragLayout 本地坐标系计算 dx/dy，这样滚动 pane 时偏移自动补偿
+            // 原版 InputListener 用 localToParentCoordinates 增量计算 translation，原理相同：
+            // 本地坐标系随 pane 滚动而变化，所以本地坐标的增量就是积木应该移动的距离
+            Vec2 localMouse = canvas.statements.stageToLocalCoordinates(Tmp.v2.set(mx, my));
+            float dx = localMouse.x - dragStartLocalX;
+            float dy = localMouse.y - dragStartLocalY;
 
             // 所有选中积木设置 translation 跟随鼠标
             for(StatementElem elem : selected){
@@ -260,6 +279,10 @@ public class BoxSelect{
             if(state == State.SELECTED && onSelectedStatement){
                 dragStartMouseX = mx;
                 dragStartMouseY = my;
+                // 记录鼠标在 DragLayout 本地坐标系中的起始位置（用于计算 translation，补偿滚动偏移）
+                Vec2 startLocal = canvas.statements.stageToLocalCoordinates(Tmp.v2.set(mx, my));
+                dragStartLocalX = startLocal.x;
+                dragStartLocalY = startLocal.y;
                 dragInsertPos = -1;
                 dragMoved = false;
                 mousePressed = true;
@@ -542,13 +565,12 @@ public class BoxSelect{
                 break;
             case DRAGGING_MOVE:
             case DRAGGING_COPY:
-                // 只画插入指示器，不再重画选中积木：
-                // 选中积木已由 DragLayout.draw() -> super.draw() -> drawChildren() 绘制，
-                // 它们因 toFront() 在 children 末尾所以画在最上层，translation 使其跟随鼠标。
-                // 之前 redrawSelectedBlocks() 直接调用 elem.draw() 没有经过 DragLayout 的
-                // transform 矩阵（setTransform(true)），导致选中积木在错误位置双重绘制，
-                // 产生幽灵伪影和跳转线错位。
+                // 先画插入指示器（阴影），再在正确的 transform 矩阵内重画选中积木。
+                // 原版 DragLayout.draw() 的顺序是：先画阴影，再 super.draw() 画积木，
+                // 所以积木在阴影上方。但我们的 overlay 在 dialog 之后绘制（最上层），
+                // 所以先画阴影，再重画积木，确保积木在阴影上方。
                 drawInsertIndicator(canvas);
+                redrawSelectedBlocksOnTop(canvas);
                 break;
             default:
                 break;
@@ -710,6 +732,53 @@ public class BoxSelect{
         Draw.reset();
     }
 
+    /** 在正确的 transform 矩阵内重画选中积木，确保积木画在插入阴影上方。
+     *  之前的 redrawSelectedBlocks() 直接调用 elem.draw() 没有经过 DragLayout 的 transform
+     *  矩阵（setTransform(true)），导致积木在错误位置绘制。
+     *
+     *  正确做法：保存当前 batch transform，设置 DragLayout 的 transform（只有平移，无旋转/缩放），
+     *  临时把 child.x/y 加上 translation（模拟 Group.drawChildren() 的行为），
+     *  调用 child.draw()，然后恢复一切。
+     *
+     *  DragLayout 的 transform = 它在 stage 中的位置（x, y），
+     *  因为 setTransform(true) 且无 rotation/scale，computeTransform() 只是一个平移矩阵。
+     */
+    private static void redrawSelectedBlocksOnTop(LCanvas canvas){
+        if(selected.isEmpty()) return;
+
+        // 保存当前 batch transform
+        Mat oldTrans = Draw.trans();
+
+        // 计算 DragLayout 的 transform 矩阵（只有平移）
+        // DragLayout 在 pane 内，pane 可能有偏移，所以用 localToStageCoordinates 计算
+        Vec2 origin = canvas.statements.localToStageCoordinates(Tmp.v1.set(0, 0));
+        Mat dragLayoutTrans = new Mat(); // 单位矩阵
+        dragLayoutTrans.idt();
+        dragLayoutTrans.translate(origin.x, origin.y);
+        Draw.trans(dragLayoutTrans);
+
+        // 在 DragLayout transform 内重画选中积木
+        // 模拟 Group.drawChildren() 的 transform 分支：
+        //   child.x += child.translation.x; child.y += child.translation.y;
+        //   child.draw();
+        //   child.x -= child.translation.x; child.y -= child.translation.y;
+        Draw.reset();
+        for(StatementElem elem : selected){
+            boolean oldCullable = elem.cullable;
+            elem.cullable = false; // 防止被裁剪掉
+            elem.x += elem.translation.x;
+            elem.y += elem.translation.y;
+            elem.draw();
+            elem.x -= elem.translation.x;
+            elem.y -= elem.translation.y;
+            elem.cullable = oldCullable;
+        }
+        Draw.reset();
+
+        // 恢复 batch transform
+        Draw.trans(oldTrans);
+    }
+
     // ==================================================================
     // 浮动工具栏
     // ==================================================================
@@ -754,7 +823,9 @@ public class BoxSelect{
 
         // 直接移动 StatementElem 对象（不使用 save/read 重建）
         // 这样 JumpStatement.dest 引用保持有效，只需调用 saveUI() 更新 destIndex
-        // 参考 MI2-Utilities 的 doCutPaste：dragging.remove() + stats.addChildAt()
+        // [MI2-Utilities] 参考 LogicHelperMindow.doCutPaste():
+        //   dragging.remove() + stats.addChildAt(pasteStart, dragging)
+        //   而非 save/read 重建对象，保留 dest 引用
 
         // 移除所有选中积木（elem.remove() → parent.removeChild() → childrenChanged()）
         for(StatementElem elem : sorted){
@@ -867,7 +938,9 @@ public class BoxSelect{
         int actualInsert = nonSelectedToChildIndex(canvas, insertPos);
 
         // 调整复制出的 JumpStatement 的 destIndex
-        // 参考MI2-Utilities的transJump逻辑，但支持多积木批量复制
+        // [MI2-Utilities] 参考 LogicHelperMindow.doCutPaste() 的 transJump 部分:
+        //   移动后重新计算 JumpStatement.destIndex: jp.destIndex = se.index + delta
+        //   本项目扩展为支持多积木批量复制，分三种情况处理 destIndex
         // 三种情况：
         // 1. 跳转目标在选中范围内（被复制了）→ 指向对应的副本
         // 2. 跳转目标不在选中范围内，且在插入点之后 → 索引偏移 +clipboardSize
