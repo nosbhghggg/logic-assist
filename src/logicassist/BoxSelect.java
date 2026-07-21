@@ -73,9 +73,13 @@ public class BoxSelect{
     private static boolean prevMouseDown = false;
     private static boolean mousePressed = false;
 
-    // 框选坐标（stage 坐标系）
+    // 框选坐标（stage 坐标系，用于距离判定）
     private static float selStartX, selStartY;
     private static float selCurX, selCurY;
+    // 框选坐标（DragLayout 本地坐标系，用于命中判定和绘制）
+    // 关键：用本地坐标系后，滚动 pane 时框选框跟随内容移动，而非固定在屏幕上
+    private static float selStartLocalX, selStartLocalY;
+    private static float selCurLocalX, selCurLocalY;
     private static boolean dragMoved = false;
 
     // 选中集合（保持插入顺序）
@@ -235,12 +239,13 @@ public class BoxSelect{
             canvas.statements.invalidate();
             canvas.statements.validate();
 
-            // 移动模式：跳过选中积木布局（它们用 translation 跟随鼠标，不占原位）
-            // 复制模式：选中积木（原积木）正常布局（留在原位），不跳过
-            if(state == State.DRAGGING_MOVE){
-                relayoutNonSelected(canvas);
-            }
-            // DRAGGING_COPY 不调用 relayoutNonSelected，原积木保持 validate() 后的位置
+            // 移动模式和复制模式都跳过选中积木布局（它们用 translation 跟随鼠标，不占原位）
+            // 复制模式与移动模式在拖动期间行为一致，区别仅在释放时：
+            //   - 移动：移除原积木并重新插入到新位置
+            //   - 复制：保留原积木，在插入位置创建副本
+            // 之前复制模式不跳过选中积木且不设 translation，导致原积木留在原位，
+            // 插入阴影与原积木重叠时显示错误
+            relayoutNonSelected(canvas);
 
             // 用 DragLayout 本地坐标系计算 dx/dy，这样滚动 pane 时偏移自动补偿
             // 原版 InputListener 用 localToParentCoordinates 增量计算 translation，原理相同：
@@ -249,16 +254,10 @@ public class BoxSelect{
             float dx = localMouse.x - dragStartLocalX;
             float dy = localMouse.y - dragStartLocalY;
 
-            // 移动模式：选中积木跟随鼠标（translation）
-            // 复制模式：原积木保持原位（不设置 translation），只有插入指示器跟随鼠标
-            // 之前复制模式也设置了 translation，导致原积木从原位消失（"隐藏"），
-            // 直到松手插入副本后才重新出现
-            if(state == State.DRAGGING_MOVE){
-                for(StatementElem elem : selected){
-                    elem.setTranslation(dx, dy);
-                }
+            // 选中积木跟随鼠标（translation），移动和复制模式一致
+            for(StatementElem elem : selected){
+                elem.setTranslation(dx, dy);
             }
-            // DRAGGING_COPY 不设置 translation，原积木留在原位
 
             // 计算插入位置（只遍历非选中积木，返回非选中积木列表中的索引）
             int newInsertPos = computeInsertPosition(canvas, my);
@@ -353,6 +352,13 @@ public class BoxSelect{
             selStartY = my;
             selCurX = mx;
             selCurY = my;
+            // 转换为 DragLayout 本地坐标系（解决滚动时框选不跟随的问题）
+            // 本地坐标固定在内容上，滚动 pane 时框选框跟随内容移动
+            Vec2 startLocal = canvas.statements.stageToLocalCoordinates(Tmp.v2.set(mx, my));
+            selStartLocalX = startLocal.x;
+            selStartLocalY = startLocal.y;
+            selCurLocalX = startLocal.x;
+            selCurLocalY = startLocal.y;
             dragMoved = false;
             mousePressed = true;
             state = State.SELECTING;
@@ -360,12 +366,18 @@ public class BoxSelect{
         }else if(curMouseDown && mousePressed && state == State.SELECTING){
             selCurX = mx;
             selCurY = my;
+            // 每帧更新本地坐标（滚动时同一屏幕位置对应不同的本地坐标）
+            Vec2 curLocal = canvas.statements.stageToLocalCoordinates(Tmp.v2.set(mx, my));
+            selCurLocalX = curLocal.x;
+            selCurLocalY = curLocal.y;
             float dx = Math.abs(selCurX - selStartX);
             float dy = Math.abs(selCurY - selStartY);
             if(dx > MIN_DRAG_DIST || dy > MIN_DRAG_DIST){
                 dragMoved = true;
                 updateSelection(canvas);
             }
+            // 自动滚动：鼠标接近屏幕顶部/底部时自动滚动 pane，允许框选视口外的积木
+            autoScroll(canvas);
 
         }else if(curMouseDown && mousePressed && (state == State.DRAGGING_MOVE || state == State.DRAGGING_COPY)){
             // 拖动中，检查是否真的移动了
@@ -470,21 +482,42 @@ public class BoxSelect{
 
     private static void updateSelection(LCanvas canvas){
         selected.clear();
-        float minX = Math.min(selStartX, selCurX);
-        float minY = Math.min(selStartY, selCurY);
-        float maxX = Math.max(selStartX, selCurX);
-        float maxY = Math.max(selStartY, selCurY);
+        // 使用 DragLayout 本地坐标系进行命中判定
+        // child.x/y/width/height 都是本地坐标，无需转换
+        float minX = Math.min(selStartLocalX, selCurLocalX);
+        float minY = Math.min(selStartLocalY, selCurLocalY);
+        float maxX = Math.max(selStartLocalX, selCurLocalX);
+        float maxY = Math.max(selStartLocalY, selCurLocalY);
 
         for(Element child : canvas.statements.getChildren()){
             if(!(child instanceof StatementElem)) continue;
-            Vec2 bottomLeft = child.localToStageCoordinates(Tmp.v2.set(0, 0));
-            float cx = bottomLeft.x;
-            float cy = bottomLeft.y;
+            float cx = child.x;
+            float cy = child.y;
             float cw = child.getWidth();
             float ch = child.getHeight();
             if(minX < cx + cw && maxX > cx && minY < cy + ch && maxY > cy){
                 selected.add((StatementElem)child);
             }
+        }
+    }
+
+    /** 框选时自动滚动：鼠标接近屏幕顶部/底部时自动滚动 pane
+     *  参考原版 LCanvas.act() 的自动滚动逻辑，但用屏幕边缘判定而非 LCanvas 边缘，
+     *  确保在各种对话框布局下都能正常工作 */
+    private static void autoScroll(LCanvas canvas){
+        if(canvas.pane == null) return;
+        float mouseY = Core.input.mouseY();
+        float screenH = Core.graphics.getHeight();
+        float margin = Scl.scl(80f);
+        float speed = Scl.scl(15f) * Time.delta;
+
+        // mouseY = 0 是屏幕底部，mouseY = screenH 是屏幕顶部
+        // 鼠标接近底部 → 向下滚动（scrollY 增大，看到更下方的积木）
+        // 鼠标接近顶部 → 向上滚动（scrollY 减小，看到更上方的积木）
+        if(mouseY < margin){
+            canvas.pane.setScrollY(canvas.pane.getScrollY() + speed);
+        }else if(mouseY > screenH - margin){
+            canvas.pane.setScrollY(canvas.pane.getScrollY() - speed);
         }
     }
 
@@ -579,7 +612,7 @@ public class BoxSelect{
 
         switch(state){
             case SELECTING:
-                drawSelectionBox();
+                drawSelectionBox(canvas);
                 drawHighlights(canvas);
                 break;
             case SELECTED:
@@ -591,30 +624,41 @@ public class BoxSelect{
                 redrawSelectedBlocksOnTop(canvas);
                 break;
             case DRAGGING_COPY:
-                // 复制模式：原积木在原位不动，只画插入指示器
-                // 不调用 redrawSelectedBlocksOnTop（原积木已由 DragLayout.draw 正常绘制）
+                // 复制模式：与移动模式一致，先画插入指示器（阴影），再重画选中积木在阴影上方
+                // 之前不调用 redrawSelectedBlocksOnTop，导致选中积木被阴影覆盖或位置错误
                 drawInsertIndicator(canvas);
+                redrawSelectedBlocksOnTop(canvas);
                 break;
             default:
                 break;
         }
     }
 
-    private static void drawSelectionBox(){
-        float minX = Math.min(selStartX, selCurX);
-        float minY = Math.min(selStartY, selCurY);
-        float w = Math.abs(selCurX - selStartX);
-        float h = Math.abs(selCurY - selStartY);
+    private static void drawSelectionBox(LCanvas canvas){
+        // 使用本地坐标计算选区，再转换为 stage 坐标绘制
+        // 这样滚动 pane 时选区框跟随内容移动，而非固定在屏幕上
+        float minX = Math.min(selStartLocalX, selCurLocalX);
+        float minY = Math.min(selStartLocalY, selCurLocalY);
+        float maxX = Math.max(selStartLocalX, selCurLocalX);
+        float maxY = Math.max(selStartLocalY, selCurLocalY);
+
+        Vec2 bottomLeft = canvas.statements.localToStageCoordinates(Tmp.v1.set(minX, minY));
+        Vec2 topRight = canvas.statements.localToStageCoordinates(Tmp.v2.set(maxX, maxY));
+
+        float sx = bottomLeft.x;
+        float sy = bottomLeft.y;
+        float w = topRight.x - bottomLeft.x;
+        float h = topRight.y - bottomLeft.y;
 
         // Mindustry 风格：半透明填充 + 边框
         Draw.color(Pal.place);
         Draw.alpha(0.15f);
-        Fill.crect(minX, minY, w, h);
+        Fill.crect(sx, sy, w, h);
 
         Draw.color(Pal.place);
         Draw.alpha(0.8f);
         Lines.stroke(Scl.scl(1.5f), Pal.place);
-        Lines.rect(minX, minY, w, h);
+        Lines.rect(sx, sy, w, h);
         Draw.reset();
     }
 
@@ -1015,7 +1059,15 @@ public class BoxSelect{
         }
 
         canvas.statements.updateJumpHeights = true;
+        // 两次 invalidate + validate 确保布局完全稳定：
+        // 第一次 validate → layout() 检测到总高度变化（新增副本），
+        //   更新 height 并调用 invalidateHierarchy()，但 validate() 随即清除 invalidated 标志
+        // 第二次 invalidate + validate 用更新后的 height 重新布局所有积木，
+        //   确保原积木位置正确（之前只 validate 一次时原积木可能基于旧高度计算位置）
         canvas.statements.invalidate();
+        canvas.statements.validate();
+        canvas.statements.invalidate();
+        canvas.statements.validate();
 
         // 重新选中复制出来的积木
         selected.clear();
