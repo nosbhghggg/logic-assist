@@ -1310,8 +1310,13 @@ public class BoxSelect{
     /** 更新所有积木的 JumpStatement destIndex（移动/删除后调用） */
     private static void saveAllJumpUI(LCanvas canvas){
         for(Element child : canvas.statements.getChildren()){
-            if(child instanceof StatementElem se && se.st instanceof JumpStatement){
-                ((JumpStatement)se.st).saveUI();
+            if(child instanceof StatementElem se && se.st instanceof JumpStatement js){
+                // dest 可能指向已删除的积木（dest.parent == null），需要安全检查
+                if(js.dest == null || js.dest.parent == null){
+                    js.destIndex = -1;
+                }else{
+                    js.saveUI();
+                }
             }
         }
     }
