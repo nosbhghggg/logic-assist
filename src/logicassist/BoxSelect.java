@@ -26,21 +26,24 @@ import java.lang.reflect.*;
 import java.util.*;
 
 /**
- * 框选功能 - 批量选择、复制、移动积木（事件驱动重构版）。
+ * 框选功能 - 批量选择、复制、移动、删除积木（事件驱动架构）。
  *
- * 架构（方案 A+B）：
- * - 输入层：CaptureListener 从事件源头拦截，原版 StatementElem 的 InputListener 收不到事件，
- *   不再需要 clearDraggingField / restoreChildrenOrder 等对抗代码。
- * - 布局层：拖动期间把选中集合的第一个元素设为原版 dragging，让原版 DragLayout.layout()
- *   跳过它；其余选中积木通过 translation 跟随。释放时直接操作 children 顺序。
+ * 架构：
+ * - 输入层：Core.scene.addCaptureListener 从事件源头拦截，event.stop() 阻止原版 StatementElem
+ *   的 InputListener 收到事件。不再需要 restoreChildrenOrder 等对抗代码。
+ * - 布局层：拖动期间 relayoutNonSelected 跳过选中积木 + applyInsertShiftViaTranslation
+ *   用 translation 腾位（不修改 child.y，避免 layout() 重置导致闪烁）。
+ *   clearDraggingField 防止原版 layout() 跳过错误积木。
+ * - 夺舍按钮：选中积木后劫持其功能按钮（删除→批量删除，+→批量复制，复制→模式切换）。
  *
  * 交互流程：
- *   1. 空白点击拖动 → 框选积木
- *   2. 释放 → 选中积木高亮，显示工具栏
- *   3. 直接拖动选中积木 → 积木跟随鼠标，显示插入指示器
- *   4. 松手 → 积木移动到新位置
- *   5. Ctrl+拖动 → 复制模式（原积木保留）
- *   6. 右键/Esc → 取消拖动
+ *   1. 空白点击拖动 → 框选积木（蓝=移动模式，绿=复制模式）
+ *   2. 释放 → 选中积木高亮，显示工具栏，积木按钮被夺舍
+ *   3. 拖动选中积木 → 积木/半透明预览跟随鼠标，显示插入指示器
+ *   4. 松手 → 积木移动/复制到新位置
+ *   5. Ctrl+点击单积木 → 选中并复制拖动
+ *   6. Delete/Backspace → 快速删除选中积木
+ *   7. 右键/Esc → 取消拖动
  *
  * ------------------------------------------------------------
  * 致谢 / Acknowledgements
@@ -53,6 +56,8 @@ public class BoxSelect{
 
     // ===== 常量 =====
     private static final float MIN_DRAG_DIST = 8f;
+    private static final Mat tmpMat = new Mat();
+    private static final Mat tmpMat2 = new Mat();
 
     // ===== 状态 =====
     private enum State{
@@ -79,8 +84,6 @@ public class BoxSelect{
     private static float dragStartMouseX, dragStartMouseY;
     private static float dragStartLocalX, dragStartLocalY;
     private static int dragInsertPos = -1;
-    // 复制模式：保存选中积木在 validate() 后的原始 Y（applyInsertShift 会修改 Y，预览需要用原始值）
-    private static final ObjectMap<StatementElem, Float> copyPreviewOrigY = new ObjectMap<>();
 
     // 插入指示器几何位置
     private static float indicatorX, indicatorY, indicatorW, indicatorH;
@@ -368,14 +371,6 @@ public class BoxSelect{
     }
 
     // ==================================================================
-    // 右键/Esc 取消（在 tick 中轮询，因为右键不经过 capture listener 的 touchDown）
-    // ==================================================================
-
-    // 注意：右键和 Esc 在 capture listener 的 touchDown 中不会被拦截（button != mouseLeft），
-    // 所以需要在 overlay.update 或 tick 中轮询。这里在 overlay.update 中处理。
-    // 但为了简单，我们在 handleTouchDragged 中检查右键状态。
-
-    // ==================================================================
     // 夺舍按钮（方向1：劫持选中积木上的功能按钮）
     // ==================================================================
 
@@ -479,11 +474,9 @@ public class BoxSelect{
 
         List<StatementElem> sorted = getSortedSelected(canvas);
         Seq<Element> children = canvas.statements.getChildren();
-        // 选中积木最后一块在 children 中的索引
         int lastIdx = children.indexOf(sorted.get(sorted.size() - 1), true);
         int insertPos = lastIdx + 1;
 
-        // 准备剪贴板数据
         StringBuilder sb = new StringBuilder();
         int[] selectedIndices = new int[sorted.size()];
         for(int i = 0; i < sorted.size(); i++){
@@ -495,8 +488,7 @@ public class BoxSelect{
         String data = sb.toString();
         int copySize = sorted.size();
 
-        int currentSize = children.size;
-        if(currentSize + copySize > LExecutor.maxInstructions){
+        if(children.size + copySize > LExecutor.maxInstructions){
             Log.info("[LogicAssist] Duplicate aborted: would exceed maxInstructions");
             return;
         }
@@ -505,26 +497,8 @@ public class BoxSelect{
         Seq<LStatement> copies = LAssembler.read(data, privileged);
         if(copies.isEmpty()) return;
 
-        // 调整 JumpStatement destIndex
-        for(LStatement st : copies){
-            if(st instanceof JumpStatement js && js.destIndex != -1){
-                int oldDest = js.destIndex;
-                int selectedPos = -1;
-                for(int i = 0; i < selectedIndices.length; i++){
-                    if(selectedIndices[i] == oldDest){
-                        selectedPos = i;
-                        break;
-                    }
-                }
-                if(selectedPos >= 0){
-                    js.destIndex = insertPos + selectedPos;
-                }else if(oldDest >= insertPos){
-                    js.destIndex = oldDest + copySize;
-                }
-            }
-        }
+        adjustJumpDestIndices(copies, selectedIndices, insertPos, copySize);
 
-        // 先全部插入，再统一 setupUI
         for(int i = 0; i < copies.size; i++){
             canvas.addAt(insertPos + i, copies.get(i));
         }
@@ -532,24 +506,9 @@ public class BoxSelect{
             st.setupUI();
         }
 
-        canvas.statements.updateJumpHeights = true;
-        canvas.statements.invalidate();
-        canvas.statements.validate();
-        canvas.statements.invalidate();
-        canvas.statements.validate();
-
-        // 重新选中复制出来的积木
-        selected.clear();
-        Seq<Element> newChildren = canvas.statements.getChildren();
-        for(int i = insertPos; i < insertPos + copies.size && i < newChildren.size; i++){
-            if(newChildren.get(i) instanceof StatementElem){
-                selected.add((StatementElem)newChildren.get(i));
-            }
-        }
-
-        state = State.SELECTED;
-        updateSelectedButtonIcons(canvas);
-        showToolbar(canvas);
+        finalizeLayout(canvas);
+        reselectRange(canvas, insertPos, copies.size);
+        enterSelectedState(canvas);
         Log.info("[LogicAssist] Duplicated " + copies.size + " blocks below selection.");
     }
 
@@ -627,7 +586,6 @@ public class BoxSelect{
         dragStartLocalY = startLocal.y;
         dragInsertPos = -1;
         dragMoved = false;
-        copyPreviewOrigY.clear();
 
         boolean ctrlDown = Core.input.keyDown(KeyCode.controlLeft);
         boolean isCopy = ctrlDown || dragMode == DragMode.COPY || button == KeyCode.mouseMiddle;
@@ -657,13 +615,6 @@ public class BoxSelect{
         // 重置所有积木的 translation（干净起点，避免累积）
         for(Element child : canvas.statements.getChildren()){
             child.setTranslation(0, 0);
-        }
-
-        // 复制模式：保存选中积木的原始 Y（用于预览绘制）
-        if(state == State.DRAGGING_COPY && copyPreviewOrigY.isEmpty()){
-            for(StatementElem elem : selected){
-                copyPreviewOrigY.put(elem, elem.y);
-            }
         }
 
         if(state == State.DRAGGING_MOVE){
@@ -738,18 +689,6 @@ public class BoxSelect{
             nonSelectedCount++;
         }
         return nonSelectedCount;
-    }
-
-    private static int nonSelectedToChildIndex(LCanvas canvas, int nonSelectedIndex){
-        Seq<Element> children = canvas.statements.getChildren();
-        int nonSelectedCount = 0;
-        for(int i = 0; i < children.size; i++){
-            Element child = children.get(i);
-            if(child instanceof StatementElem && selected.contains(child)) continue;
-            if(nonSelectedCount == nonSelectedIndex) return i;
-            nonSelectedCount++;
-        }
-        return children.size;
     }
 
     // ==================================================================
@@ -974,13 +913,11 @@ public class BoxSelect{
     private static void redrawSelectedBlocksOnTop(LCanvas canvas){
         if(selected.isEmpty()) return;
 
-        Mat oldTrans = new Mat().set(Draw.trans());
+        Mat oldTrans = tmpMat.set(Draw.trans());
 
         Vec2 origin = canvas.statements.localToStageCoordinates(Tmp.v1.set(0, 0));
-        Mat dragLayoutTrans = new Mat();
-        dragLayoutTrans.idt();
-        dragLayoutTrans.setToTranslation(origin.x, origin.y);
-        Draw.trans(dragLayoutTrans);
+        tmpMat2.idt().setToTranslation(origin.x, origin.y);
+        Draw.trans(tmpMat2);
 
         Draw.reset();
         for(StatementElem elem : selected){
@@ -1004,7 +941,6 @@ public class BoxSelect{
     private static void drawCopyPreview(LCanvas canvas){
         if(selected.isEmpty()) return;
 
-        // 计算鼠标偏移量（本地坐标系）
         float mx = Core.input.mouseX();
         float my = Core.input.mouseY();
         Vec2 stageMouse = Core.scene.screenToStageCoordinates(Tmp.v3.set(mx, my));
@@ -1012,18 +948,13 @@ public class BoxSelect{
         float dx = localMouse.x - dragStartLocalX;
         float dy = localMouse.y - dragStartLocalY;
 
-        // 在 DragLayout transform 内绘制半透明预览
-        Mat oldTrans = new Mat().set(Draw.trans());
+        Mat oldTrans = tmpMat.set(Draw.trans());
 
         Vec2 origin = canvas.statements.localToStageCoordinates(Tmp.v1.set(0, 0));
-        Mat dragLayoutTrans = new Mat();
-        dragLayoutTrans.idt();
-        dragLayoutTrans.setToTranslation(origin.x, origin.y);
-        Draw.trans(dragLayoutTrans);
+        tmpMat2.idt().setToTranslation(origin.x, origin.y);
+        Draw.trans(tmpMat2);
 
         Draw.reset();
-        // 半透明绘制选中积木的预览
-        // child.y 是原始位置（translation 已被 updateDrag 重置为0，不修改 child.y）
         Draw.alpha(0.5f);
         for(StatementElem elem : selected){
             boolean oldCullable = elem.cullable;
@@ -1087,7 +1018,6 @@ public class BoxSelect{
         Seq<Element> children = canvas.statements.getChildren();
         int count = sorted.size();
 
-        // 移除所有选中积木
         for(StatementElem elem : sorted){
             elem.remove();
         }
@@ -1101,25 +1031,9 @@ public class BoxSelect{
         canvas.statements.updateJumpHeights = true;
         canvas.statements.invalidate();
         canvas.statements.validate();
-
-        // 更新所有 JumpStatement 的 destIndex
-        for(Element child : canvas.statements.getChildren()){
-            if(child instanceof StatementElem se && se.st instanceof JumpStatement){
-                ((JumpStatement)se.st).saveUI();
-            }
-        }
-
-        // 重新选中移动后的积木
-        selected.clear();
-        Seq<Element> newChildren = canvas.statements.getChildren();
-        for(int i = actualInsert; i < actualInsert + count && i < newChildren.size; i++){
-            if(newChildren.get(i) instanceof StatementElem){
-                selected.add((StatementElem)newChildren.get(i));
-            }
-        }
-
-        state = State.SELECTED;
-        showToolbar(canvas);
+        saveAllJumpUI(canvas);
+        reselectRange(canvas, actualInsert, count);
+        enterSelectedState(canvas);
         Log.info("[LogicAssist] Drag-moved " + count + " blocks to position " + actualInsert);
     }
 
@@ -1149,108 +1063,49 @@ public class BoxSelect{
     private static void executeDragCopy(LCanvas canvas, int insertPos){
         clearDraggingField(canvas);
 
-        // 重置 translation（原积木回到原位）
         for(StatementElem elem : selected){
             elem.setTranslation(0, 0);
         }
 
         if(clipboardData == null || clipboardData.isEmpty()){
-            state = State.SELECTED;
-            showToolbar(canvas);
+            enterSelectedState(canvas);
             return;
         }
 
         int currentSize = canvas.statements.getChildren().size;
         if(currentSize + clipboardSize > LExecutor.maxInstructions){
             Log.info("[LogicAssist] Copy aborted: would exceed maxInstructions");
-            state = State.SELECTED;
-            showToolbar(canvas);
+            enterSelectedState(canvas);
             return;
         }
 
         boolean privileged = isPrivileged(canvas);
         Seq<LStatement> copies = LAssembler.read(clipboardData, privileged);
         if(copies.isEmpty()){
-            state = State.SELECTED;
-            showToolbar(canvas);
+            enterSelectedState(canvas);
             return;
         }
 
-        // 复制模式：insertPos 已经是真实 child 索引（computeInsertPosition 遍历了所有 children）
         int actualInsert = Math.max(0, Math.min(insertPos, canvas.statements.getChildren().size));
 
-        // 记录原始 children 数量（插入前），用于后续 destIndex 调整
-        int origCount = canvas.statements.getChildren().size;
+        adjustJumpDestIndices(copies, clipboardSelectedIndices, actualInsert, clipboardSize);
 
-        // 先调整复制出的 JumpStatement 的 destIndex
-        // 三种情况：
-        //   1. jump 目标在选中范围内 → 指向对应的副本
-        //   2. jump 目标在 actualInsert 或之后 → 目标被副本挤后移
-        //   3. jump 目标在 actualInsert 之前 → 不变
-        for(LStatement st : copies){
-            if(st instanceof JumpStatement js && js.destIndex != -1){
-                int oldDest = js.destIndex;
-                int selectedPos = -1;
-                if(clipboardSelectedIndices != null){
-                    for(int i = 0; i < clipboardSelectedIndices.length; i++){
-                        if(clipboardSelectedIndices[i] == oldDest){
-                            selectedPos = i;
-                            break;
-                        }
-                    }
-                }
-                if(selectedPos >= 0){
-                    // 目标在选中范围内 → 指向副本中对应位置的积木
-                    js.destIndex = actualInsert + selectedPos;
-                }else if(oldDest >= actualInsert){
-                    // 目标在插入点或之后 → 目标被副本挤后移
-                    js.destIndex = oldDest + clipboardSize;
-                }
-                // else: 目标在插入点之前 → 不变
-            }
-        }
-
-        // 先全部插入，再统一 setupUI
-        // 之前逐个 addAt + setupUI，导致后面的副本还没插入时前面的 jump.setupUI() 找不到目标
+        // 先全部插入，再统一 setupUI（避免 jump.setupUI() 找不到未插入的副本）
         for(int i = 0; i < copies.size; i++){
             canvas.addAt(actualInsert + i, copies.get(i));
         }
-        // 全部插入完成后，统一调用 setupUI 连接 jump 目标
         for(LStatement st : copies){
             st.setupUI();
         }
 
-        // 清除选中集合，让 validate 中的 layout() 正确布局所有积木（包括原积木）
-        // 之前 selected 仍包含原积木，如果 layout 依赖 selected 状态可能出问题
-        // 原版 layout() 只跳过 dragging，不跳过 selected，所以这里不需要清空 selected
-        // 但需要确保 dragging 已清除（已在方法开头 clearDraggingField）
-        canvas.statements.updateJumpHeights = true;
-        canvas.statements.invalidate();
-        canvas.statements.validate();
-
-        // 二次 invalidate + validate，处理高度变化后的布局
-        // （新增副本导致 totalHeight 变化，layout() 第一次更新 height 并 invalidateHierarchy，
-        //   但 validate() 清除了 invalidated 标志，需要第二次才能用新 height 布局）
-        canvas.statements.invalidate();
-        canvas.statements.validate();
-
-        Log.info("[LogicAssist] Copy done. Children count: " + canvas.statements.getChildren().size);
-
-        // 重新选中复制出来的积木
-        selected.clear();
-        Seq<Element> newChildren = canvas.statements.getChildren();
-        for(int i = actualInsert; i < actualInsert + copies.size && i < newChildren.size; i++){
-            if(newChildren.get(i) instanceof StatementElem){
-                selected.add((StatementElem)newChildren.get(i));
-            }
-        }
+        finalizeLayout(canvas);
+        reselectRange(canvas, actualInsert, copies.size);
 
         clipboardData = null;
         clipboardSize = 0;
         clipboardSelectedIndices = null;
 
-        state = State.SELECTED;
-        showToolbar(canvas);
+        enterSelectedState(canvas);
         Log.info("[LogicAssist] Drag-copied " + copies.size + " blocks to position " + insertPos);
     }
 
@@ -1280,16 +1135,8 @@ public class BoxSelect{
             elem.remove();
         }
 
-        // 更新剩余积木的 JumpStatement destIndex
-        for(Element child : canvas.statements.getChildren()){
-            if(child instanceof StatementElem se && se.st instanceof JumpStatement){
-                ((JumpStatement)se.st).saveUI();
-            }
-        }
-
-        canvas.statements.updateJumpHeights = true;
-        canvas.statements.invalidate();
-        canvas.statements.validate();
+        saveAllJumpUI(canvas);
+        finalizeLayout(canvas);
 
         selected.clear();
         state = State.IDLE;
@@ -1310,6 +1157,64 @@ public class BoxSelect{
             return Integer.compare(ia, ib);
         });
         return sorted;
+    }
+
+    /** 调整副本中 JumpStatement 的 destIndex（executeDragCopy 和 duplicateSelectedBelow 共用） */
+    private static void adjustJumpDestIndices(Seq<LStatement> copies, int[] selectedIndices, int insertPos, int copySize){
+        for(LStatement st : copies){
+            if(st instanceof JumpStatement js && js.destIndex != -1){
+                int oldDest = js.destIndex;
+                int selectedPos = -1;
+                if(selectedIndices != null){
+                    for(int i = 0; i < selectedIndices.length; i++){
+                        if(selectedIndices[i] == oldDest){
+                            selectedPos = i;
+                            break;
+                        }
+                    }
+                }
+                if(selectedPos >= 0){
+                    js.destIndex = insertPos + selectedPos;
+                }else if(oldDest >= insertPos){
+                    js.destIndex = oldDest + copySize;
+                }
+            }
+        }
+    }
+
+    /** 从 children 中重新选中指定范围的积木 */
+    private static void reselectRange(LCanvas canvas, int start, int count){
+        selected.clear();
+        Seq<Element> newChildren = canvas.statements.getChildren();
+        for(int i = start; i < start + count && i < newChildren.size; i++){
+            if(newChildren.get(i) instanceof StatementElem){
+                selected.add((StatementElem)newChildren.get(i));
+            }
+        }
+    }
+
+    /** 双重 invalidate + validate，处理高度变化后的布局稳定 */
+    private static void finalizeLayout(LCanvas canvas){
+        canvas.statements.updateJumpHeights = true;
+        canvas.statements.invalidate();
+        canvas.statements.validate();
+        canvas.statements.invalidate();
+        canvas.statements.validate();
+    }
+
+    /** 更新所有积木的 JumpStatement destIndex（移动/删除后调用） */
+    private static void saveAllJumpUI(LCanvas canvas){
+        for(Element child : canvas.statements.getChildren()){
+            if(child instanceof StatementElem se && se.st instanceof JumpStatement){
+                ((JumpStatement)se.st).saveUI();
+            }
+        }
+    }
+
+    /** 进入 SELECTED 状态并显示工具栏 */
+    private static void enterSelectedState(LCanvas canvas){
+        state = State.SELECTED;
+        showToolbar(canvas);
     }
 
     private static LCanvas getCanvas(){
