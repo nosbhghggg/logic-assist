@@ -259,6 +259,11 @@ public class BoxSelect{
             return false;
         }
 
+        // 滚动条是 ScrollPane 的一部分，点击滚动条时放行给原版处理
+        if(target instanceof ScrollPane){
+            return false;
+        }
+
         // 沿祖先链查找 StatementElem
         StatementElem clickedStmt = null;
         Element current = target;
@@ -860,6 +865,9 @@ public class BoxSelect{
             default:
                 break;
         }
+
+        // 始终绘制彩色滚动条（无论什么状态）
+        drawColorScrollbar(canvas);
     }
 
     /** 根据当前模式返回框选颜色 */
@@ -902,6 +910,80 @@ public class BoxSelect{
             Lines.rect(v.x - pad, v.y - pad,
                        elem.getWidth() + pad * 2, elem.getHeight() + pad * 2);
         }
+        Draw.reset();
+    }
+
+    /** 绘制彩色滚动条：在 ScrollPane 的垂直滚动条轨道上，按每个积木的比例绘制对应类别颜色。
+     *  滚动条滑块（knob）改为半透明，可以看到下方的颜色段。 */
+    private static void drawColorScrollbar(LCanvas canvas){
+        ScrollPane pane = canvas.pane;
+        if(pane == null || !pane.hasScroll()) return;
+
+        // 获取 ScrollPane 在 stage 中的位置和尺寸
+        float paneX = pane.x;
+        float paneY = pane.y;
+        float paneW = pane.getWidth();
+        float paneH = pane.getHeight();
+
+        // 滚动条宽度（近似，原版约 10-12px）
+        float scrollbarW = 10f;
+        // 滚动条 X 位置（右侧）
+        float scrollbarX = paneX + paneW - scrollbarW - 2f;
+        // 滚动条 Y 范围
+        float scrollbarTop = paneY + paneH - 2f;
+        float scrollbarBottom = paneY + 2f;
+        float scrollbarH = scrollbarTop - scrollbarBottom;
+        if(scrollbarH <= 0) return;
+
+        // 计算总高度和每个积木的位置
+        Seq<Element> children = canvas.statements.getChildren();
+        if(children.isEmpty()) return;
+
+        float space = Scl.scl(10f);
+        float totalHeight = 0;
+        for(Element child : children){
+            totalHeight += child.getPrefHeight() + space;
+        }
+        totalHeight -= space;
+        if(totalHeight <= 0) return;
+
+        // 当前滚动偏移
+        float scrollY = pane.getScrollY();
+        float maxY = pane.getMaxY();
+        float visibleH = pane.getScrollHeight();
+
+        // 绘制每个积木对应的颜色段
+        float cy = 0;
+        for(Element child : children){
+            float elemH = child.getPrefHeight();
+            float elemColorH = (elemH + space) / totalHeight * scrollbarH;
+            float elemTop = scrollbarTop - (cy / totalHeight) * scrollbarH;
+
+            Color c = Color.white;
+            if(child instanceof StatementElem se && se.st != null){
+                LCategory cat = se.st.category();
+                if(cat != null && cat.color != null){
+                    c = cat.color;
+                }
+            }
+
+            Draw.color(c);
+            Draw.alpha(0.6f);
+            // 绘制颜色段（从下往上，与积木顺序一致）
+            Fill.crect(scrollbarX, elemTop - elemColorH, scrollbarW, elemColorH);
+
+            cy += elemH + space;
+        }
+        Draw.reset();
+
+        // 在颜色段上方绘制半透明滚动条滑块
+        float knobH = Math.max(scrollbarW * 2, (visibleH / totalHeight) * scrollbarH);
+        float knobY = scrollbarTop - knobH + (scrollY / maxY) * (scrollbarH - knobH);
+        if(maxY <= 0) knobY = scrollbarBottom;
+
+        Draw.color(Color.black);
+        Draw.alpha(0.3f);
+        Fill.crect(scrollbarX, knobY, scrollbarW, knobH);
         Draw.reset();
     }
 
