@@ -21,6 +21,7 @@ import mindustry.graphics.*;
 import mindustry.logic.*;
 import mindustry.logic.LCanvas.*;
 import mindustry.logic.LStatements.*;
+import mindustry.ui.*;
 import mindustry.ui.dialogs.*;
 
 import java.lang.reflect.*;
@@ -146,7 +147,7 @@ public class BoxSelect{
                 dialog.localToStageCoordinates(dialogPos);
                 toolbar.setPosition(
                     dialogPos.x + canvas.getWidth() / 2f - toolbar.getWidth() / 2f,
-                    dialogPos.y + canvas.getHeight() - toolbar.getHeight() - Scl.scl(10f)
+                    dialogPos.y + Scl.scl(10f)
                 );
                 toolbar.toFront();
             }
@@ -1070,19 +1071,23 @@ public class BoxSelect{
         // 更新选中积木的按钮图标
         updateSelectedButtonIcons(canvas);
 
-        toolbar = new Table(Tex.buttonTrans);
-        toolbar.margin(6);
-        toolbar.defaults().size(90, 34).padRight(4);
+        // 使用原版 header 按钮风格（Styles.logici, 24px 图标按钮）
+        toolbar = new Table(Tex.pane);
+        toolbar.margin(4);
+        toolbar.defaults().size(24f).padRight(6f);
 
-        TextButton modeBtn = new TextButton(dragMode == DragMode.MOVE ? "@la.move" : "@la.copy");
+        // 模式切换按钮（独立 style 实例，避免共享修改）
+        ImageButton.ImageButtonStyle modeStyle = new ImageButton.ImageButtonStyle(Styles.logici);
+        modeStyle.imageUp = dragMode == DragMode.MOVE ? Icon.up : Icon.copy;
+        ImageButton modeBtn = new ImageButton(modeStyle);
         modeBtn.clicked(() -> {
             dragMode = (dragMode == DragMode.MOVE) ? DragMode.COPY : DragMode.MOVE;
-            modeBtn.setText(dragMode == DragMode.MOVE ? "@la.move" : "@la.copy");
+            modeBtn.getStyle().imageUp = dragMode == DragMode.MOVE ? Icon.up : Icon.copy;
             updateSelectedButtonIcons(canvas);
         });
         toolbar.add(modeBtn);
 
-        toolbar.button("@la.cancel", Icon.cancel, () -> clearSelection());
+        toolbar.button(Icon.cancel, Styles.logici, () -> clearSelection());
 
         toolbar.pack();
         canvas.addChild(toolbar);
