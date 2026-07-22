@@ -79,6 +79,8 @@ public class BoxSelect{
     private static float dragStartMouseX, dragStartMouseY;
     private static float dragStartLocalX, dragStartLocalY;
     private static int dragInsertPos = -1;
+    // 复制模式：保存选中积木在 validate() 后的原始 Y（applyInsertShift 会修改 Y，预览需要用原始值）
+    private static final ObjectMap<StatementElem, Float> copyPreviewOrigY = new ObjectMap<>();
 
     // 插入指示器几何位置
     private static float indicatorX, indicatorY, indicatorW, indicatorH;
@@ -268,7 +270,16 @@ public class BoxSelect{
         boolean onSelectedStatement = onStatement && selected.contains(clickedStmt);
 
         if(onStatement && !onSelectedStatement){
-            // 点击非选中积木 → 放行给原版（让原版处理单积木拖拽）
+            // Ctrl+点击非选中积木 → 选中该积木并开始复制拖动
+            boolean ctrlDown = Core.input.keyDown(KeyCode.controlLeft);
+            if(ctrlDown){
+                selected.clear();
+                selected.add(clickedStmt);
+                startDrag(canvas, stageCoords.x, stageCoords.y, button);
+                event.stop();
+                return true;
+            }
+            // 普通点击非选中积木 → 放行给原版（让原版处理单积木拖拽）
             // 但如果当前有选中，先清空选中
             if(!selected.isEmpty()){
                 clearSelection();
@@ -430,6 +441,7 @@ public class BoxSelect{
         dragStartLocalY = startLocal.y;
         dragInsertPos = -1;
         dragMoved = false;
+        copyPreviewOrigY.clear();
 
         boolean ctrlDown = Core.input.keyDown(KeyCode.controlLeft);
         boolean isCopy = ctrlDown || dragMode == DragMode.COPY || button == KeyCode.mouseMiddle;
@@ -455,6 +467,14 @@ public class BoxSelect{
         // 每帧 invalidate + validate 强制重新 layout
         canvas.statements.invalidate();
         canvas.statements.validate();
+
+        // 复制模式：validate 后保存选中积木的原始 Y（applyInsertShift 会修改 Y）
+        // 只需保存一次，因为 validate() 每帧重置位置到相同值
+        if(state == State.DRAGGING_COPY && copyPreviewOrigY.isEmpty()){
+            for(StatementElem elem : selected){
+                copyPreviewOrigY.put(elem, elem.y);
+            }
+        }
 
         if(state == State.DRAGGING_MOVE){
             // 移动模式：跳过选中积木布局（它们用 translation 跟随鼠标，不占原位）
@@ -506,6 +526,19 @@ public class BoxSelect{
         Vec2 local = canvas.statements.stageToLocalCoordinates(Tmp.v2.set(0, stageY));
         float localY = local.y;
 
+        if(state == State.DRAGGING_COPY){
+            // 复制模式：遍历所有 children（原积木在原位，插入位置可以在它们之间）
+            for(int i = 0; i < children.size; i++){
+                Element child = children.get(i);
+                float centerLocalY = child.y + child.getHeight() / 2f;
+                if(localY > centerLocalY){
+                    return i;
+                }
+            }
+            return children.size;
+        }
+
+        // 移动模式：跳过选中积木（它们已从原位移走）
         int insertPos = 0;
         int nonSelectedCount = 0;
         for(Element child : children){
@@ -555,7 +588,7 @@ public class BoxSelect{
         }
     }
 
-    /** 把插入位置下方的非选中积木下移 */
+    /** 把插入位置下方的积木下移腾出空隙 */
     private static void applyInsertShift(LCanvas canvas){
         if(dragInsertPos < 0) return;
         Seq<Element> children = canvas.statements.getChildren();
@@ -567,13 +600,21 @@ public class BoxSelect{
         }
         shiftAmount -= space;
 
-        int nonSelectedIndex = 0;
-        for(Element child : children){
-            if(child instanceof StatementElem && selected.contains(child)) continue;
-            if(nonSelectedIndex >= dragInsertPos){
-                child.y -= shiftAmount;
+        if(state == State.DRAGGING_COPY){
+            // 复制模式：dragInsertPos 是真实 child 索引，移动所有该位置及之后的 children
+            for(int i = dragInsertPos; i < children.size; i++){
+                children.get(i).y -= shiftAmount;
             }
-            nonSelectedIndex++;
+        }else{
+            // 移动模式：dragInsertPos 是非选中索引，只移动非选中积木
+            int nonSelectedIndex = 0;
+            for(Element child : children){
+                if(child instanceof StatementElem && selected.contains(child)) continue;
+                if(nonSelectedIndex >= dragInsertPos){
+                    child.y -= shiftAmount;
+                }
+                nonSelectedIndex++;
+            }
         }
     }
 
@@ -594,25 +635,41 @@ public class BoxSelect{
         }
         totalH -= space;
 
-        List<Element> nonSelected = new ArrayList<>();
-        for(Element child : children){
-            if(child instanceof StatementElem && selected.contains(child)) continue;
-            nonSelected.add(child);
-        }
-
         float insertLocalY;
         float drawLocalX = 0;
 
-        if(nonSelected.isEmpty() || dragInsertPos == 0){
-            insertLocalY = canvas.statements.getHeight();
-        }else if(dragInsertPos >= nonSelected.size()){
-            Element last = nonSelected.get(nonSelected.size() - 1);
-            insertLocalY = last.y - space;
-            drawLocalX = last.x;
+        if(state == State.DRAGGING_COPY){
+            // 复制模式：dragInsertPos 是真实 child 索引，用所有 children 计算
+            if(children.isEmpty() || dragInsertPos == 0){
+                insertLocalY = canvas.statements.getHeight();
+            }else if(dragInsertPos >= children.size){
+                Element last = children.get(children.size - 1);
+                insertLocalY = last.y - space;
+                drawLocalX = last.x;
+            }else{
+                Element before = children.get(dragInsertPos - 1);
+                insertLocalY = before.y - space;
+                drawLocalX = before.x;
+            }
         }else{
-            Element before = nonSelected.get(dragInsertPos - 1);
-            insertLocalY = before.y - space;
-            drawLocalX = before.x;
+            // 移动模式：用非选中 children 计算
+            List<Element> nonSelected = new ArrayList<>();
+            for(Element child : children){
+                if(child instanceof StatementElem && selected.contains(child)) continue;
+                nonSelected.add(child);
+            }
+
+            if(nonSelected.isEmpty() || dragInsertPos == 0){
+                insertLocalY = canvas.statements.getHeight();
+            }else if(dragInsertPos >= nonSelected.size()){
+                Element last = nonSelected.get(nonSelected.size() - 1);
+                insertLocalY = last.y - space;
+                drawLocalX = last.x;
+            }else{
+                Element before = nonSelected.get(dragInsertPos - 1);
+                insertLocalY = before.y - space;
+                drawLocalX = before.x;
+            }
         }
 
         Vec2 stagePos = canvas.statements.localToStageCoordinates(Tmp.v1.set(drawLocalX, insertLocalY));
@@ -768,16 +825,18 @@ public class BoxSelect{
         Draw.trans(dragLayoutTrans);
 
         Draw.reset();
-        // 半透明绘制选中积木的预览
+        // 半透明绘制选中积木的预览（用保存的原始 Y，因为 applyInsertShift 可能修改了 elem.y）
         Draw.alpha(0.5f);
         for(StatementElem elem : selected){
             boolean oldCullable = elem.cullable;
             elem.cullable = false;
+            float origY = copyPreviewOrigY.get(elem, elem.y);
+            float saveY = elem.y;
             elem.x += dx;
-            elem.y += dy;
+            elem.y = origY + dy;
             elem.draw();
             elem.x -= dx;
-            elem.y -= dy;
+            elem.y = saveY;
             elem.cullable = oldCullable;
         }
         Draw.reset();
@@ -917,7 +976,8 @@ public class BoxSelect{
             return;
         }
 
-        int actualInsert = nonSelectedToChildIndex(canvas, insertPos);
+        // 复制模式：insertPos 已经是真实 child 索引（computeInsertPosition 遍历了所有 children）
+        int actualInsert = Math.max(0, Math.min(insertPos, canvas.statements.getChildren().size));
 
         // 记录原始 children 数量（插入前），用于后续 destIndex 调整
         int origCount = canvas.statements.getChildren().size;
