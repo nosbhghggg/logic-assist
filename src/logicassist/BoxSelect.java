@@ -123,15 +123,6 @@ public class BoxSelect{
 
             if(!initialized){
                 setup(canvas);
-                // 给 canvas.pane 设置独立的 style（克隆原版，去掉原版滚动条绘制）
-                // 只影响这一个 ScrollPane，不影响全局
-                if(canvas.pane != null && canvas.pane.getStyle() != null){
-                    ScrollPane.ScrollPaneStyle orig = canvas.pane.getStyle();
-                    ScrollPane.ScrollPaneStyle clone = new ScrollPane.ScrollPaneStyle(orig);
-                    clone.vScroll = null;
-                    clone.vScrollKnob = null;
-                    canvas.pane.setStyle(clone);
-                }
                 initialized = true;
                 Log.info("[LogicAssist] BoxSelect initialized (capture listener mode).");
             }
@@ -980,7 +971,7 @@ public class BoxSelect{
             }
 
             Draw.color(c);
-            Draw.alpha(0.6f);
+            Draw.alpha(0.35f);
             // 绘制颜色段（从下往上，与积木顺序一致）
             Fill.crect(scrollbarX, elemTop - elemColorH, scrollbarW, elemColorH);
 
@@ -988,17 +979,6 @@ public class BoxSelect{
         }
         Draw.flush();
         ScissorStack.pop();
-        Draw.reset();
-
-        // 在颜色段上方绘制半透明滚动条滑块
-        // scrollY=0（顶部）时滑块在顶端，scrollY=maxY（底部）时滑块在底端
-        float knobH = Math.max(scrollbarW * 2, (visibleH / totalHeight) * scrollbarH);
-        float knobY = scrollbarTop - knobH - (maxY > 0 ? (scrollY / maxY) * (scrollbarH - knobH) : 0);
-        if(maxY <= 0) knobY = scrollbarBottom;
-
-        Draw.color(Color.black);
-        Draw.alpha(0.3f);
-        Fill.crect(scrollbarX, knobY, scrollbarW, knobH);
         Draw.reset();
     }
 
