@@ -3,6 +3,7 @@ package logicassist;
 import arc.*;
 import arc.graphics.*;
 import arc.graphics.g2d.*;
+import arc.math.geom.*;
 import arc.input.*;
 import arc.math.*;
 import arc.math.geom.*;
@@ -124,6 +125,13 @@ public class BoxSelect{
                 setup(canvas);
                 initialized = true;
                 Log.info("[LogicAssist] BoxSelect initialized (capture listener mode).");
+            }
+
+            // 隐藏原版滚动条，用彩色滚动条替代
+            if(canvas.pane != null && canvas.pane.getStyle() != null){
+                ScrollPane.ScrollPaneStyle style = canvas.pane.getStyle();
+                if(style.vScroll != null) style.vScroll = null;
+                if(style.vScrollKnob != null) style.vScrollKnob = null;
             }
 
             LogicDialog dialog = Vars.ui.logic;
@@ -952,7 +960,9 @@ public class BoxSelect{
         float maxY = pane.getMaxY();
         float visibleH = pane.getScrollHeight();
 
-        // 绘制每个积木对应的颜色段
+        // 绘制每个积木对应的颜色段（用 ScissorStack 裁剪到滚动条可视区域内）
+        Rect clipRect = Tmp.r1.set(scrollbarX, scrollbarBottom, scrollbarW, scrollbarH);
+        ScissorStack.push(clipRect);
         float cy = 0;
         for(Element child : children){
             float elemH = child.getPrefHeight();
@@ -974,6 +984,8 @@ public class BoxSelect{
 
             cy += elemH + space;
         }
+        Draw.flush();
+        ScissorStack.pop();
         Draw.reset();
 
         // 在颜色段上方绘制半透明滚动条滑块
