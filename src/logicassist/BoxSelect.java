@@ -126,6 +126,13 @@ public class BoxSelect{
                 resetState(canvas);
             }
 
+            // Delete 键快速删除选中积木
+            if(dialog != null && dialog.isShown() && state == State.SELECTED && !selected.isEmpty()){
+                if(Core.input.keyTap(KeyCode.del) || Core.input.keyTap(KeyCode.backspace)){
+                    deleteSelected(canvas);
+                }
+            }
+
             // 更新工具栏位置
             if(toolbar != null && toolbar.parent != null && dialog != null && dialog.isShown()){
                 Vec2 dialogPos = Tmp.v1.set(0, 0);
@@ -202,6 +209,18 @@ public class BoxSelect{
         return target instanceof Image;
     }
 
+    /** 判断元素是否是 canvas（LCanvas）的后代。
+     *  返回按钮、变量按钮等在 LogicDialog.buttons 区，不在 canvas 内。
+     *  只有 canvas 内的空白区才允许框选。 */
+    private static boolean isDescendantOfCanvas(Element elem, LCanvas canvas){
+        Element current = elem;
+        while(current != null){
+            if(current == canvas) return true;
+            current = current.parent;
+        }
+        return false;
+    }
+
     private static boolean handleTouchDown(InputEvent event, float x, float y, int pointer, KeyCode button){
         LCanvas canvas = getCanvas();
         if(canvas == null || !shouldIntercept(canvas)) return false;
@@ -220,6 +239,12 @@ public class BoxSelect{
 
         // 如果点在按钮上（Image），放行给原版
         if(isClickOnButton(target)){
+            return false;
+        }
+
+        // 关键：只有点击在 canvas（LCanvas）内部时才介入
+        // 返回按钮、变量按钮等在 LogicDialog.buttons 区，不在 canvas 内，放行给原版
+        if(!isDescendantOfCanvas(target, canvas)){
             return false;
         }
 
@@ -258,7 +283,7 @@ public class BoxSelect{
             return true;  // 注册 touchFocus，接收后续 drag/up
         }
 
-        // 空白区点击 → 开始框选，拦截事件
+        // canvas 内的空白区点击 → 开始框选，拦截事件
         startBoxSelect(canvas, stageCoords.x, stageCoords.y);
         event.stop();
         return true;
@@ -431,27 +456,34 @@ public class BoxSelect{
         canvas.statements.invalidate();
         canvas.statements.validate();
 
-        // 跳过选中积木布局（它们用 translation 跟随鼠标，不占原位）
-        relayoutNonSelected(canvas);
+        if(state == State.DRAGGING_MOVE){
+            // 移动模式：跳过选中积木布局（它们用 translation 跟随鼠标，不占原位）
+            relayoutNonSelected(canvas);
 
-        // 用 DragLayout 本地坐标系计算 dx/dy
-        Vec2 localMouse = canvas.statements.stageToLocalCoordinates(Tmp.v2.set(mx, my));
-        float dx = localMouse.x - dragStartLocalX;
-        float dy = localMouse.y - dragStartLocalY;
+            // 用 DragLayout 本地坐标系计算 dx/dy
+            Vec2 localMouse = canvas.statements.stageToLocalCoordinates(Tmp.v2.set(mx, my));
+            float dx = localMouse.x - dragStartLocalX;
+            float dy = localMouse.y - dragStartLocalY;
 
-        // 选中积木跟随鼠标
-        for(StatementElem elem : selected){
-            elem.setTranslation(dx, dy);
+            // 选中积木跟随鼠标
+            for(StatementElem elem : selected){
+                elem.setTranslation(dx, dy);
+            }
         }
+        // 复制模式：原积木保持原位（validate 已正确布局），不设置 translation
+        // 预览跟随鼠标由 drawCopyPreview() 绘制半透明积木
 
-        // 计算插入位置
+        // 计算插入位置（两种模式都需要）
         int newInsertPos = computeInsertPosition(canvas, my);
         if(newInsertPos != dragInsertPos){
             dragInsertPos = newInsertPos;
         }
 
-        // 手动腾位
-        applyInsertShift(canvas);
+        // 移动模式：手动腾位（复制模式不需要腾位，原积木在原位）
+        if(state == State.DRAGGING_MOVE){
+            applyInsertShift(canvas);
+        }
+
         // 强制更新跳转线位置
         canvas.statements.jumps.act(0f);
         // 计算指示器几何
@@ -627,9 +659,14 @@ public class BoxSelect{
                 drawHighlights(canvas);
                 break;
             case DRAGGING_MOVE:
-            case DRAGGING_COPY:
                 drawInsertIndicator(canvas);
                 redrawSelectedBlocksOnTop(canvas);
+                break;
+            case DRAGGING_COPY:
+                // 复制模式：原积木在原位由 DragLayout.draw 正常绘制
+                // 画插入指示器 + 半透明预览跟随鼠标
+                drawInsertIndicator(canvas);
+                drawCopyPreview(canvas);
                 break;
             default:
                 break;
@@ -707,8 +744,46 @@ public class BoxSelect{
         Draw.trans(oldTrans);
     }
 
-    // ==================================================================
-    // 浮动工具栏
+    /** 复制模式：绘制半透明的积木预览跟随鼠标。
+     *  原积木保持原位不动，预览只是视觉提示"副本会放在这里"。
+     *  用选中积木的样式 + 半透明，在鼠标偏移位置绘制。 */
+    private static void drawCopyPreview(LCanvas canvas){
+        if(selected.isEmpty()) return;
+
+        // 计算鼠标偏移量（本地坐标系）
+        float mx = Core.input.mouseX();
+        float my = Core.input.mouseY();
+        Vec2 stageMouse = Core.scene.screenToStageCoordinates(Tmp.v3.set(mx, my));
+        Vec2 localMouse = canvas.statements.stageToLocalCoordinates(Tmp.v3.set(stageMouse.x, stageMouse.y));
+        float dx = localMouse.x - dragStartLocalX;
+        float dy = localMouse.y - dragStartLocalY;
+
+        // 在 DragLayout transform 内绘制半透明预览
+        Mat oldTrans = new Mat().set(Draw.trans());
+
+        Vec2 origin = canvas.statements.localToStageCoordinates(Tmp.v1.set(0, 0));
+        Mat dragLayoutTrans = new Mat();
+        dragLayoutTrans.idt();
+        dragLayoutTrans.setToTranslation(origin.x, origin.y);
+        Draw.trans(dragLayoutTrans);
+
+        Draw.reset();
+        // 半透明绘制选中积木的预览
+        Draw.alpha(0.5f);
+        for(StatementElem elem : selected){
+            boolean oldCullable = elem.cullable;
+            elem.cullable = false;
+            elem.x += dx;
+            elem.y += dy;
+            elem.draw();
+            elem.x -= dx;
+            elem.y -= dy;
+            elem.cullable = oldCullable;
+        }
+        Draw.reset();
+
+        Draw.trans(oldTrans);
+    }
     // ==================================================================
 
     private static void showToolbar(LCanvas canvas){
@@ -870,9 +945,21 @@ public class BoxSelect{
             copies.get(i).setupUI();
         }
 
+        // 清除选中集合，让 validate 中的 layout() 正确布局所有积木（包括原积木）
+        // 之前 selected 仍包含原积木，如果 layout 依赖 selected 状态可能出问题
+        // 原版 layout() 只跳过 dragging，不跳过 selected，所以这里不需要清空 selected
+        // 但需要确保 dragging 已清除（已在方法开头 clearDraggingField）
         canvas.statements.updateJumpHeights = true;
         canvas.statements.invalidate();
         canvas.statements.validate();
+
+        // 二次 invalidate + validate，处理高度变化后的布局
+        // （新增副本导致 totalHeight 变化，layout() 第一次更新 height 并 invalidateHierarchy，
+        //   但 validate() 清除了 invalidated 标志，需要第二次才能用新 height 布局）
+        canvas.statements.invalidate();
+        canvas.statements.validate();
+
+        Log.info("[LogicAssist] Copy done. Children count: " + canvas.statements.getChildren().size);
 
         // 重新选中复制出来的积木
         selected.clear();
@@ -905,6 +992,34 @@ public class BoxSelect{
         state = State.SELECTED;
         showToolbar(canvas);
         Log.info("[LogicAssist] Drag cancelled.");
+    }
+
+    /** Delete 键快速删除选中积木 */
+    private static void deleteSelected(LCanvas canvas){
+        clearDraggingField(canvas);
+
+        List<StatementElem> sorted = getSortedSelected(canvas);
+        int count = sorted.size();
+
+        for(StatementElem elem : sorted){
+            elem.remove();
+        }
+
+        // 更新剩余积木的 JumpStatement destIndex
+        for(Element child : canvas.statements.getChildren()){
+            if(child instanceof StatementElem se && se.st instanceof JumpStatement){
+                ((JumpStatement)se.st).saveUI();
+            }
+        }
+
+        canvas.statements.updateJumpHeights = true;
+        canvas.statements.invalidate();
+        canvas.statements.validate();
+
+        selected.clear();
+        state = State.IDLE;
+        hideToolbar();
+        Log.info("[LogicAssist] Deleted " + count + " blocks.");
     }
 
     // ==================================================================
