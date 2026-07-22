@@ -479,10 +479,10 @@ public class BoxSelect{
             dragInsertPos = newInsertPos;
         }
 
-        // 移动模式：手动腾位（复制模式不需要腾位，原积木在原位）
-        if(state == State.DRAGGING_MOVE){
-            applyInsertShift(canvas);
-        }
+        // 两种模式都需要腾位：在插入位置下方的积木下移，给即将插入的积木腾出空间
+        // 移动模式：选中积木已从原位移走（relayoutNonSelected 跳过），腾位后显示空隙
+        // 复制模式：选中积木在原位，腾位在原积木之外显示插入空隙
+        applyInsertShift(canvas);
 
         // 强制更新跳转线位置
         canvas.statements.jumps.act(0f);
@@ -919,7 +919,14 @@ public class BoxSelect{
 
         int actualInsert = nonSelectedToChildIndex(canvas, insertPos);
 
-        // 调整复制出的 JumpStatement 的 destIndex
+        // 记录原始 children 数量（插入前），用于后续 destIndex 调整
+        int origCount = canvas.statements.getChildren().size;
+
+        // 先调整复制出的 JumpStatement 的 destIndex
+        // 三种情况：
+        //   1. jump 目标在选中范围内 → 指向对应的副本
+        //   2. jump 目标在 actualInsert 或之后 → 目标被副本挤后移
+        //   3. jump 目标在 actualInsert 之前 → 不变
         for(LStatement st : copies){
             if(st instanceof JumpStatement js && js.destIndex != -1){
                 int oldDest = js.destIndex;
@@ -933,16 +940,24 @@ public class BoxSelect{
                     }
                 }
                 if(selectedPos >= 0){
+                    // 目标在选中范围内 → 指向副本中对应位置的积木
                     js.destIndex = actualInsert + selectedPos;
                 }else if(oldDest >= actualInsert){
+                    // 目标在插入点或之后 → 目标被副本挤后移
                     js.destIndex = oldDest + clipboardSize;
                 }
+                // else: 目标在插入点之前 → 不变
             }
         }
 
+        // 先全部插入，再统一 setupUI
+        // 之前逐个 addAt + setupUI，导致后面的副本还没插入时前面的 jump.setupUI() 找不到目标
         for(int i = 0; i < copies.size; i++){
             canvas.addAt(actualInsert + i, copies.get(i));
-            copies.get(i).setupUI();
+        }
+        // 全部插入完成后，统一调用 setupUI 连接 jump 目标
+        for(LStatement st : copies){
+            st.setupUI();
         }
 
         // 清除选中集合，让 validate 中的 layout() 正确布局所有积木（包括原积木）
