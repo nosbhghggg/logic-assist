@@ -123,6 +123,15 @@ public class BoxSelect{
 
             if(!initialized){
                 setup(canvas);
+                // 给 canvas.pane 设置独立的 style（克隆原版，去掉原版滚动条绘制）
+                // 只影响这一个 ScrollPane，不影响全局
+                if(canvas.pane != null && canvas.pane.getStyle() != null){
+                    ScrollPane.ScrollPaneStyle orig = canvas.pane.getStyle();
+                    ScrollPane.ScrollPaneStyle clone = new ScrollPane.ScrollPaneStyle(orig);
+                    clone.vScroll = null;
+                    clone.vScrollKnob = null;
+                    canvas.pane.setStyle(clone);
+                }
                 initialized = true;
                 Log.info("[LogicAssist] BoxSelect initialized (capture listener mode).");
             }
