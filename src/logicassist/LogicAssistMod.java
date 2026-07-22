@@ -2,16 +2,15 @@ package logicassist;
 
 import arc.*;
 import arc.util.*;
+import logicassist.expr.*;
 import mindustry.game.EventType.*;
 import mindustry.mod.*;
 
 /**
  * Logic Assist 模组主类。
  *
- * 逻辑编辑器增强模组，提供跳转线着色等功能。
+ * 逻辑编辑器增强模组，提供跳转线着色、框选批量操作、复杂表达式编辑等功能。
  * 继承 {@link Mod}，在 init() 中注册事件监听和设置项。
- *
- * 原 jump-line-color JS 脚本模组的 Java 重写版本。
  */
 public class LogicAssistMod extends Mod{
 
@@ -34,6 +33,7 @@ public class LogicAssistMod extends Mod{
             JumpLineColor.setupSettings();
             JumpLineColor.startLoop();
             BoxSelect.init();
+            ExprHook.init();
 
             Log.info("[LogicAssist] Initialization complete.");
         });
