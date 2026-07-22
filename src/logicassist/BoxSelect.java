@@ -127,13 +127,6 @@ public class BoxSelect{
                 Log.info("[LogicAssist] BoxSelect initialized (capture listener mode).");
             }
 
-            // 隐藏原版滚动条，用彩色滚动条替代
-            if(canvas.pane != null && canvas.pane.getStyle() != null){
-                ScrollPane.ScrollPaneStyle style = canvas.pane.getStyle();
-                if(style.vScroll != null) style.vScroll = null;
-                if(style.vScrollKnob != null) style.vScrollKnob = null;
-            }
-
             LogicDialog dialog = Vars.ui.logic;
             if(dialog != null && !dialog.isShown() && state != State.IDLE){
                 resetState(canvas);
@@ -989,8 +982,9 @@ public class BoxSelect{
         Draw.reset();
 
         // 在颜色段上方绘制半透明滚动条滑块
+        // scrollY=0（顶部）时滑块在顶端，scrollY=maxY（底部）时滑块在底端
         float knobH = Math.max(scrollbarW * 2, (visibleH / totalHeight) * scrollbarH);
-        float knobY = scrollbarTop - knobH + (scrollY / maxY) * (scrollbarH - knobH);
+        float knobY = scrollbarTop - knobH - (maxY > 0 ? (scrollY / maxY) * (scrollbarH - knobH) : 0);
         if(maxY <= 0) knobY = scrollbarBottom;
 
         Draw.color(Color.black);
