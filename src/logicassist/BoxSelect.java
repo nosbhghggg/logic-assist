@@ -650,12 +650,16 @@ public class BoxSelect{
         // 清除原版 dragging（防止原版 InputListener 残留干扰）
         clearDraggingField(canvas);
 
-        // 每帧 invalidate + validate 强制重新 layout
+        // invalidate + validate 获取基础布局（所有积木在原始位置）
         canvas.statements.invalidate();
         canvas.statements.validate();
 
-        // 复制模式：validate 后保存选中积木的原始 Y（applyInsertShift 会修改 Y）
-        // 只需保存一次，因为 validate() 每帧重置位置到相同值
+        // 重置所有积木的 translation（干净起点，避免累积）
+        for(Element child : canvas.statements.getChildren()){
+            child.setTranslation(0, 0);
+        }
+
+        // 复制模式：保存选中积木的原始 Y（用于预览绘制）
         if(state == State.DRAGGING_COPY && copyPreviewOrigY.isEmpty()){
             for(StatementElem elem : selected){
                 copyPreviewOrigY.put(elem, elem.y);
@@ -671,7 +675,7 @@ public class BoxSelect{
             float dx = localMouse.x - dragStartLocalX;
             float dy = localMouse.y - dragStartLocalY;
 
-            // 选中积木跟随鼠标
+            // 选中积木跟随鼠标（translation）
             for(StatementElem elem : selected){
                 elem.setTranslation(dx, dy);
             }
@@ -679,16 +683,14 @@ public class BoxSelect{
         // 复制模式：原积木保持原位（validate 已正确布局），不设置 translation
         // 预览跟随鼠标由 drawCopyPreview() 绘制半透明积木
 
-        // 计算插入位置（两种模式都需要）
+        // 计算插入位置（用原始 child.y，translation 已重置为0）
         int newInsertPos = computeInsertPosition(canvas, my);
         if(newInsertPos != dragInsertPos){
             dragInsertPos = newInsertPos;
         }
 
-        // 两种模式都需要腾位：在插入位置下方的积木下移，给即将插入的积木腾出空间
-        // 移动模式：选中积木已从原位移走（relayoutNonSelected 跳过），腾位后显示空隙
-        // 复制模式：选中积木在原位，腾位在原积木之外显示插入空隙
-        applyInsertShift(canvas);
+        // 用 translation 腾位（不修改 child.y，避免 layout() 重置导致闪烁）
+        applyInsertShiftViaTranslation(canvas);
 
         // 强制更新跳转线位置
         canvas.statements.jumps.act(0f);
@@ -774,8 +776,9 @@ public class BoxSelect{
         }
     }
 
-    /** 把插入位置下方的积木下移腾出空隙 */
-    private static void applyInsertShift(LCanvas canvas){
+    /** 用 translation 腾位（不修改 child.y，避免 layout() 重置导致闪烁）。
+     *  translation 在 Element.draw() 中应用，layout() 不会重置它。 */
+    private static void applyInsertShiftViaTranslation(LCanvas canvas){
         if(dragInsertPos < 0) return;
         Seq<Element> children = canvas.statements.getChildren();
         float space = Scl.scl(10f);
@@ -789,7 +792,8 @@ public class BoxSelect{
         if(state == State.DRAGGING_COPY){
             // 复制模式：dragInsertPos 是真实 child 索引，移动所有该位置及之后的 children
             for(int i = dragInsertPos; i < children.size; i++){
-                children.get(i).y -= shiftAmount;
+                Element child = children.get(i);
+                child.setTranslation(child.translation.x, child.translation.y - shiftAmount);
             }
         }else{
             // 移动模式：dragInsertPos 是非选中索引，只移动非选中积木
@@ -797,7 +801,7 @@ public class BoxSelect{
             for(Element child : children){
                 if(child instanceof StatementElem && selected.contains(child)) continue;
                 if(nonSelectedIndex >= dragInsertPos){
-                    child.y -= shiftAmount;
+                    child.setTranslation(child.translation.x, child.translation.y - shiftAmount);
                 }
                 nonSelectedIndex++;
             }
@@ -916,6 +920,11 @@ public class BoxSelect{
         }
     }
 
+    /** 根据当前模式返回框选颜色 */
+    private static Color getModeColor(){
+        return dragMode == DragMode.COPY ? Pal.heal : Pal.place;
+    }
+
     private static void drawSelectionBox(LCanvas canvas){
         float minX = Math.min(selStartLocalX, selCurLocalX);
         float minY = Math.min(selStartLocalY, selCurLocalY);
@@ -930,19 +939,21 @@ public class BoxSelect{
         float w = topRight.x - bottomLeft.x;
         float h = topRight.y - bottomLeft.y;
 
-        Draw.color(Pal.place);
+        Color modeColor = getModeColor();
+        Draw.color(modeColor);
         Draw.alpha(0.15f);
         Fill.crect(sx, sy, w, h);
 
-        Draw.color(Pal.place);
+        Draw.color(modeColor);
         Draw.alpha(0.8f);
-        Lines.stroke(Scl.scl(1.5f), Pal.place);
+        Lines.stroke(Scl.scl(1.5f), modeColor);
         Lines.rect(sx, sy, w, h);
         Draw.reset();
     }
 
     private static void drawHighlights(LCanvas canvas){
-        Lines.stroke(Scl.scl(3f), Pal.accent);
+        Color modeColor = getModeColor();
+        Lines.stroke(Scl.scl(3f), modeColor);
         for(StatementElem elem : selected){
             Vec2 v = elem.localToStageCoordinates(Tmp.v1.set(0, 0));
             float pad = Scl.scl(4f);
@@ -1011,18 +1022,17 @@ public class BoxSelect{
         Draw.trans(dragLayoutTrans);
 
         Draw.reset();
-        // 半透明绘制选中积木的预览（用保存的原始 Y，因为 applyInsertShift 可能修改了 elem.y）
+        // 半透明绘制选中积木的预览
+        // child.y 是原始位置（translation 已被 updateDrag 重置为0，不修改 child.y）
         Draw.alpha(0.5f);
         for(StatementElem elem : selected){
             boolean oldCullable = elem.cullable;
             elem.cullable = false;
-            float origY = copyPreviewOrigY.get(elem, elem.y);
-            float saveY = elem.y;
             elem.x += dx;
-            elem.y = origY + dy;
+            elem.y += dy;
             elem.draw();
             elem.x -= dx;
-            elem.y = saveY;
+            elem.y -= dy;
             elem.cullable = oldCullable;
         }
         Draw.reset();
