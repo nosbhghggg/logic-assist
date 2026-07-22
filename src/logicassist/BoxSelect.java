@@ -505,6 +505,9 @@ public class BoxSelect{
         }
 
         finalizeLayout(canvas);
+        // 先恢复所有积木的按钮图标（旧选中积木的 Icon.move 改回 Icon.copy）
+        restoreButtonIcons(canvas);
+        selected.clear();
         reselectRange(canvas, insertPos, copies.size);
         enterSelectedState(canvas);
         Log.info("[LogicAssist] Duplicated " + copies.size + " blocks below selection.");
@@ -958,6 +961,9 @@ public class BoxSelect{
         }
         totalHeight -= space;
         if(totalHeight <= 0) return;
+
+        // 积木总高度不超过可视区域时不绘制彩色滚动条
+        if(totalHeight <= pane.getHeight()) return;
 
         // 绘制每个积木对应的颜色段（用 ScissorStack 裁剪到滚动条可视区域内）
         Rect clipRect = Tmp.r1.set(scrollbarX, scrollbarBottom, scrollbarW, scrollbarH);
