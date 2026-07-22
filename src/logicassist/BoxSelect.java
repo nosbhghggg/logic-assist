@@ -239,9 +239,13 @@ public class BoxSelect{
         Vec2 stageCoords = Tmp.v1.set(x, y);
         Element target = event.targetActor;
 
-        // 如果点在按钮上（Image），放行给原版
+        // 如果点在按钮上（Image），检查是否是选中积木的按钮
         if(isClickOnButton(target)){
-            return false;
+            // 尝试夺舍：如果点击的是选中积木上的按钮，执行批量操作
+            if(tryHijackButton(canvas, event, target)){
+                return true; // 已拦截
+            }
+            return false; // 非选中积木的按钮，放行给原版
         }
 
         // 关键：只有点击在 canvas（LCanvas）内部时才介入
@@ -372,6 +376,184 @@ public class BoxSelect{
     // 但为了简单，我们在 handleTouchDragged 中检查右键状态。
 
     // ==================================================================
+    // 夺舍按钮（方向1：劫持选中积木上的功能按钮）
+    // ==================================================================
+
+    /** 尝试夺舍选中积木上的按钮点击。
+     *  如果点击的是选中积木上的按钮（删除/+号/复制），执行批量操作并拦截事件。
+     *  @return true 如果已拦截，false 如果应放行 */
+    private static boolean tryHijackButton(LCanvas canvas, InputEvent event, Element target){
+        if(selected.isEmpty()) return false;
+
+        // 从 Image 向上找 ImageButton
+        Element btn = target.parent;
+        while(btn != null && !(btn instanceof ImageButton)) btn = btn.parent;
+        if(btn == null) return false;
+        ImageButton button = (ImageButton)btn;
+
+        // 从 ImageButton 向上找 StatementElem
+        StatementElem stmtElem = null;
+        Element p = btn.parent;
+        while(p != null){
+            if(p instanceof StatementElem){
+                stmtElem = (StatementElem)p;
+                break;
+            }
+            p = p.parent;
+        }
+        if(stmtElem == null || !selected.contains(stmtElem)) return false;
+
+        // 识别按钮：通过 style.imageUp（包括被夺舍后改过的图标）
+        Drawable icon = button.getStyle().imageUp;
+        // 删除按钮：Icon.cancel → 批量删除
+        if(icon == Icon.cancel){
+            event.stop();
+            Core.app.post(() -> deleteSelected(canvas));
+            return true;
+        }
+        // +按钮：Icon.add → 在选中积木下方批量复制一份
+        if(icon == Icon.add){
+            event.stop();
+            Core.app.post(() -> duplicateSelectedBelow(canvas));
+            return true;
+        }
+        // 复制/移动切换按钮：Icon.copy 或 Icon.move → 切换模式
+        if(icon == Icon.copy || icon == Icon.move){
+            event.stop();
+            dragMode = (dragMode == DragMode.MOVE) ? DragMode.COPY : DragMode.MOVE;
+            updateSelectedButtonIcons(canvas);
+            return true;
+        }
+        // 其他按钮放行（MindustryX 的额外按钮等）
+        return false;
+    }
+
+    /** 更新所有选中积木的复制/移动按钮图标 */
+    private static void updateSelectedButtonIcons(LCanvas canvas){
+        Drawable modeIcon = (dragMode == DragMode.MOVE) ? Icon.move : Icon.copy;
+        for(StatementElem elem : selected){
+            findAndSetIcon(elem, Icon.copy, modeIcon);
+            findAndSetIcon(elem, Icon.move, modeIcon);
+        }
+    }
+
+    /** 在 StatementElem 中查找指定图标的 ImageButton 并替换图标 */
+    private static void findAndSetIcon(StatementElem elem, Drawable oldIcon, Drawable newIcon){
+        // 递归查找 ImageButton
+        findAndSetIconRecursive(elem, oldIcon, newIcon);
+    }
+
+    private static boolean findAndSetIconRecursive(Element e, Drawable oldIcon, Drawable newIcon){
+        if(e instanceof ImageButton){
+            ImageButton btn = (ImageButton)e;
+            if(btn.getStyle().imageUp == oldIcon){
+                // 创建新样式副本，避免修改全局样式
+                ImageButton.ImageButtonStyle newStyle = new ImageButton.ImageButtonStyle(btn.getStyle());
+                newStyle.imageUp = newIcon;
+                btn.setStyle(newStyle);
+                return true;
+            }
+        }
+        if(e instanceof Group){
+            for(Element child : ((Group)e).getChildren()){
+                if(findAndSetIconRecursive(child, oldIcon, newIcon)) return true;
+            }
+        }
+        return false;
+    }
+
+    /** 恢复所有积木的按钮图标（取消选中时调用） */
+    private static void restoreButtonIcons(LCanvas canvas){
+        if(canvas == null || canvas.statements == null) return;
+        for(Element child : canvas.statements.getChildren()){
+            if(child instanceof StatementElem){
+                // 把 Icon.move 改回 Icon.copy
+                findAndSetIcon((StatementElem)child, Icon.move, Icon.copy);
+            }
+        }
+    }
+
+    /** 在选中积木最后一块的下方批量复制一份 */
+    private static void duplicateSelectedBelow(LCanvas canvas){
+        clearDraggingField(canvas);
+
+        List<StatementElem> sorted = getSortedSelected(canvas);
+        Seq<Element> children = canvas.statements.getChildren();
+        // 选中积木最后一块在 children 中的索引
+        int lastIdx = children.indexOf(sorted.get(sorted.size() - 1), true);
+        int insertPos = lastIdx + 1;
+
+        // 准备剪贴板数据
+        StringBuilder sb = new StringBuilder();
+        int[] selectedIndices = new int[sorted.size()];
+        for(int i = 0; i < sorted.size(); i++){
+            selectedIndices[i] = children.indexOf(sorted.get(i), true);
+            sorted.get(i).st.saveUI();
+            sorted.get(i).st.write(sb);
+            sb.append("\n");
+        }
+        String data = sb.toString();
+        int copySize = sorted.size();
+
+        int currentSize = children.size;
+        if(currentSize + copySize > LExecutor.maxInstructions){
+            Log.info("[LogicAssist] Duplicate aborted: would exceed maxInstructions");
+            return;
+        }
+
+        boolean privileged = isPrivileged(canvas);
+        Seq<LStatement> copies = LAssembler.read(data, privileged);
+        if(copies.isEmpty()) return;
+
+        // 调整 JumpStatement destIndex
+        for(LStatement st : copies){
+            if(st instanceof JumpStatement js && js.destIndex != -1){
+                int oldDest = js.destIndex;
+                int selectedPos = -1;
+                for(int i = 0; i < selectedIndices.length; i++){
+                    if(selectedIndices[i] == oldDest){
+                        selectedPos = i;
+                        break;
+                    }
+                }
+                if(selectedPos >= 0){
+                    js.destIndex = insertPos + selectedPos;
+                }else if(oldDest >= insertPos){
+                    js.destIndex = oldDest + copySize;
+                }
+            }
+        }
+
+        // 先全部插入，再统一 setupUI
+        for(int i = 0; i < copies.size; i++){
+            canvas.addAt(insertPos + i, copies.get(i));
+        }
+        for(LStatement st : copies){
+            st.setupUI();
+        }
+
+        canvas.statements.updateJumpHeights = true;
+        canvas.statements.invalidate();
+        canvas.statements.validate();
+        canvas.statements.invalidate();
+        canvas.statements.validate();
+
+        // 重新选中复制出来的积木
+        selected.clear();
+        Seq<Element> newChildren = canvas.statements.getChildren();
+        for(int i = insertPos; i < insertPos + copies.size && i < newChildren.size; i++){
+            if(newChildren.get(i) instanceof StatementElem){
+                selected.add((StatementElem)newChildren.get(i));
+            }
+        }
+
+        state = State.SELECTED;
+        updateSelectedButtonIcons(canvas);
+        showToolbar(canvas);
+        Log.info("[LogicAssist] Duplicated " + copies.size + " blocks below selection.");
+    }
+
+    // ==================================================================
     // 框选
     // ==================================================================
 
@@ -409,6 +591,9 @@ public class BoxSelect{
     }
 
     private static void clearSelection(){
+        // 恢复按钮图标
+        LCanvas canvas = getCanvas();
+        if(canvas != null) restoreButtonIcons(canvas);
         selected.clear();
         state = State.IDLE;
         hideToolbar();
@@ -416,6 +601,7 @@ public class BoxSelect{
 
     private static void resetState(LCanvas canvas){
         clearDraggingField(canvas);
+        restoreButtonIcons(canvas);
         for(StatementElem elem : selected){
             elem.setTranslation(0, 0);
         }
@@ -847,6 +1033,9 @@ public class BoxSelect{
 
     private static void showToolbar(LCanvas canvas){
         hideToolbar();
+        // 更新选中积木的按钮图标
+        updateSelectedButtonIcons(canvas);
+
         toolbar = new Table(Tex.buttonTrans);
         toolbar.margin(6);
         toolbar.defaults().size(90, 34).padRight(4);
@@ -855,6 +1044,7 @@ public class BoxSelect{
         modeBtn.clicked(() -> {
             dragMode = (dragMode == DragMode.MOVE) ? DragMode.COPY : DragMode.MOVE;
             modeBtn.setText(dragMode == DragMode.MOVE ? "@la.move" : "@la.copy");
+            updateSelectedButtonIcons(canvas);
         });
         toolbar.add(modeBtn);
 
