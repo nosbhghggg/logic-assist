@@ -96,7 +96,6 @@ public class BoxSelect{
     private static int[] clipboardSelectedIndices = null;
 
     // UI 元素
-    private static Table toolbar;
     private static Element overlay;
     private static boolean initialized = false;
     private static InputListener captureListener;
@@ -141,16 +140,6 @@ public class BoxSelect{
                 }
             }
 
-            // 更新工具栏位置
-            if(toolbar != null && toolbar.parent != null && dialog != null && dialog.isShown()){
-                Vec2 dialogPos = Tmp.v1.set(0, 0);
-                dialog.localToStageCoordinates(dialogPos);
-                toolbar.setPosition(
-                    dialogPos.x + canvas.getWidth() / 2f - toolbar.getWidth() / 2f,
-                    dialogPos.y + Scl.scl(10f)
-                );
-                toolbar.toFront();
-            }
         }catch(Exception e){
             Log.info("[LogicAssist] BoxSelect tick error: " + e);
         }
@@ -283,11 +272,6 @@ public class BoxSelect{
             current = current.parent;
         }
 
-        // 检测是否在工具栏上
-        if(isMouseOnToolbar(stageCoords.x, stageCoords.y)){
-            return false; // 放行给工具栏按钮
-        }
-
         boolean onStatement = clickedStmt != null;
         boolean onSelectedStatement = onStatement && selected.contains(clickedStmt);
 
@@ -365,7 +349,6 @@ public class BoxSelect{
             }else{
                 if(!selected.isEmpty()){
                     state = State.SELECTED;
-                    showToolbar(canvas);
                 }else{
                     state = State.IDLE;
                 }
@@ -570,7 +553,6 @@ public class BoxSelect{
         if(canvas != null) restoreButtonIcons(canvas);
         selected.clear();
         state = State.IDLE;
-        hideToolbar();
     }
 
     private static void resetState(LCanvas canvas){
@@ -582,7 +564,6 @@ public class BoxSelect{
         }
         selected.clear();
         state = State.IDLE;
-        hideToolbar();
         dragInsertPos = -1;
         dragMoved = false;
         clipboardData = null;
@@ -615,8 +596,6 @@ public class BoxSelect{
         }else{
             state = State.DRAGGING_MOVE;
         }
-
-        hideToolbar();
     }
 
     /** 拖动期间每帧更新 translation 和插入位置 */
@@ -910,14 +889,35 @@ public class BoxSelect{
     }
 
     private static void drawHighlights(LCanvas canvas){
-        Color modeColor = getModeColor();
-        Lines.stroke(Scl.scl(3f), modeColor);
+        if(selected.isEmpty()) return;
+
+        // 计算所有选中积木的总包围框
+        float minX = Float.MAX_VALUE, minY = Float.MAX_VALUE;
+        float maxX = Float.MIN_VALUE, maxY = Float.MIN_VALUE;
         for(StatementElem elem : selected){
             Vec2 v = elem.localToStageCoordinates(Tmp.v1.set(0, 0));
-            float pad = Scl.scl(4f);
-            Lines.rect(v.x - pad, v.y - pad,
-                       elem.getWidth() + pad * 2, elem.getHeight() + pad * 2);
+            minX = Math.min(minX, v.x);
+            minY = Math.min(minY, v.y);
+            maxX = Math.max(maxX, v.x + elem.getWidth());
+            maxY = Math.max(maxY, v.y + elem.getHeight());
         }
+
+        float pad = Scl.scl(4f);
+        float x = minX - pad;
+        float y = minY - pad;
+        float w = maxX - minX + pad * 2;
+        float h = maxY - minY + pad * 2;
+
+        // 建造效果样式：Pal.accent + 脉动半透明填充 + 边框
+        float pulse = Mathf.absin(Time.time, 10f, 0.15f);
+        Draw.color(Pal.accent);
+        Draw.alpha(0.12f + pulse);
+        Fill.crect(x, y, w, h);
+
+        Draw.color(Pal.accent);
+        Draw.alpha(0.8f + pulse);
+        Lines.stroke(Scl.scl(1.5f), Pal.accent);
+        Lines.rect(x, y, w, h);
         Draw.reset();
     }
 
@@ -1065,43 +1065,6 @@ public class BoxSelect{
         Draw.trans(oldTrans);
     }
     // ==================================================================
-
-    private static void showToolbar(LCanvas canvas){
-        hideToolbar();
-        // 更新选中积木的按钮图标
-        updateSelectedButtonIcons(canvas);
-
-        // 使用原版 header 按钮风格（Styles.logici, 24px 图标按钮）
-        toolbar = new Table(Tex.pane);
-        toolbar.margin(4);
-        toolbar.defaults().size(24f).padRight(6f);
-
-        // 模式切换按钮（独立 style 实例，避免共享修改）
-        ImageButton.ImageButtonStyle modeStyle = new ImageButton.ImageButtonStyle(Styles.logici);
-        modeStyle.imageUp = dragMode == DragMode.MOVE ? Icon.up : Icon.copy;
-        ImageButton modeBtn = new ImageButton(modeStyle);
-        modeBtn.clicked(() -> {
-            dragMode = (dragMode == DragMode.MOVE) ? DragMode.COPY : DragMode.MOVE;
-            modeBtn.getStyle().imageUp = dragMode == DragMode.MOVE ? Icon.up : Icon.copy;
-            updateSelectedButtonIcons(canvas);
-        });
-        toolbar.add(modeBtn);
-
-        toolbar.button(Icon.cancel, Styles.logici, () -> clearSelection());
-
-        toolbar.pack();
-        canvas.addChild(toolbar);
-        toolbar.toFront();
-    }
-
-    private static void hideToolbar(){
-        if(toolbar != null){
-            toolbar.remove();
-            toolbar = null;
-        }
-    }
-
-    // ==================================================================
     // 拖动移动
     // ==================================================================
 
@@ -1221,7 +1184,6 @@ public class BoxSelect{
         clipboardSelectedIndices = null;
         dragInsertPos = -1;
         state = State.SELECTED;
-        showToolbar(canvas);
         Log.info("[LogicAssist] Drag cancelled.");
     }
 
@@ -1246,7 +1208,6 @@ public class BoxSelect{
 
         selected.clear();
         state = State.IDLE;
-        hideToolbar();
         Log.info("[LogicAssist] Deleted " + count + " blocks.");
     }
 
@@ -1297,6 +1258,8 @@ public class BoxSelect{
                 selected.add((StatementElem)newChildren.get(i));
             }
         }
+        // 夺舍新选中积木的 copy/move 按钮图标
+        updateSelectedButtonIcons(canvas);
     }
 
     /** 双重 invalidate + validate，处理高度变化后的布局稳定 */
@@ -1326,10 +1289,9 @@ public class BoxSelect{
         }
     }
 
-    /** 进入 SELECTED 状态并显示工具栏 */
+    /** 进入 SELECTED 状态 */
     private static void enterSelectedState(LCanvas canvas){
         state = State.SELECTED;
-        showToolbar(canvas);
     }
 
     private static LCanvas getCanvas(){
@@ -1339,18 +1301,6 @@ public class BoxSelect{
         }catch(Exception e){
             return null;
         }
-    }
-
-    private static boolean isMouseOnToolbar(float stageX, float stageY){
-        if(toolbar == null) return false;
-        Element hit = Core.scene.hit(stageX, stageY, true);
-        if(hit == null) return false;
-        Element current = hit;
-        while(current != null){
-            if(current == toolbar) return true;
-            current = current.parent;
-        }
-        return false;
     }
 
     private static boolean isPrivileged(LCanvas canvas){
