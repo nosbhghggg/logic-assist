@@ -191,13 +191,8 @@ public class BoxSelect{
         overlay.visible = true;
         Core.scene.add(overlay);
         overlay.update(() -> {
-            // 对话框未显示时跳过，避免无意义的 setSize + toFront
-            LogicDialog dialog = Vars.ui.logic;
-            if(dialog == null || !dialog.isShown()){
-                overlay.visible = false;
-                return;
-            }
-            overlay.visible = true;
+            // 不使用 visible 控制显示——visible=false 会导致 act() 不执行，
+            // update() 不会被调用，形成死锁。直接执行 setSize + toFront 即可。
             overlay.setSize(Core.graphics.getWidth(), Core.graphics.getHeight());
             overlay.toFront();
         });
@@ -568,8 +563,9 @@ public class BoxSelect{
     private static void resetState(LCanvas canvas){
         clearDraggingField(canvas);
         restoreButtonIcons(canvas);
-        for(StatementElem elem : selected){
-            elem.setTranslation(0, 0);
+        // 重置所有积木的 translation（非选中积木可能被 applyInsertShiftViaTranslation 设了 translation）
+        for(Element child : canvas.statements.getChildren()){
+            child.setTranslation(0, 0);
         }
         selected.clear();
         state = State.IDLE;
@@ -1026,8 +1022,9 @@ public class BoxSelect{
     private static void executeDragMove(LCanvas canvas, int insertPos){
         clearDraggingField(canvas);
 
-        for(StatementElem elem : selected){
-            elem.setTranslation(0, 0);
+        // 重置所有积木的 translation（updateDrag 中 applyInsertShiftViaTranslation 给非选中积木也设了 translation）
+        for(Element child : canvas.statements.getChildren()){
+            child.setTranslation(0, 0);
         }
 
         List<StatementElem> sorted = getSortedSelected(canvas);
@@ -1079,8 +1076,9 @@ public class BoxSelect{
     private static void executeDragCopy(LCanvas canvas, int insertPos){
         clearDraggingField(canvas);
 
-        for(StatementElem elem : selected){
-            elem.setTranslation(0, 0);
+        // 重置所有积木的 translation（updateDrag 中 applyInsertShiftViaTranslation 给非选中积木也设了 translation）
+        for(Element child : canvas.statements.getChildren()){
+            child.setTranslation(0, 0);
         }
 
         if(clipboardData == null || clipboardData.isEmpty()){
@@ -1128,8 +1126,9 @@ public class BoxSelect{
     private static void cancelDrag(LCanvas canvas){
         clearDraggingField(canvas);
 
-        for(StatementElem elem : selected){
-            elem.setTranslation(0, 0);
+        // 重置所有积木的 translation（updateDrag 中 applyInsertShiftViaTranslation 给非选中积木也设了 translation）
+        for(Element child : canvas.statements.getChildren()){
+            child.setTranslation(0, 0);
         }
         clipboardData = null;
         clipboardSize = 0;
@@ -1143,6 +1142,11 @@ public class BoxSelect{
     /** Delete 键快速删除选中积木 */
     private static void deleteSelected(LCanvas canvas){
         clearDraggingField(canvas);
+
+        // 重置所有积木的 translation（updateDrag 中可能给非选中积木设了 translation）
+        for(Element child : canvas.statements.getChildren()){
+            child.setTranslation(0, 0);
+        }
 
         List<StatementElem> sorted = getSortedSelected(canvas);
         int count = sorted.size();
