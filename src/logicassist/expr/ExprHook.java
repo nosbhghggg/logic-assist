@@ -1,8 +1,9 @@
 package logicassist.expr;
 
 import arc.*;
+import arc.func.*;
 import arc.scene.*;
-import arc.scene.event.VisibilityListener;
+import arc.scene.ui.*;
 import arc.struct.*;
 import arc.util.*;
 import mindustry.*;
@@ -14,71 +15,54 @@ import java.lang.reflect.*;
 import java.util.*;
 
 /**
- * 表达式集成钩子：在逻辑编辑器打开时折叠 op 链为表达式 UI，关闭前展开。
+ * 表达式集成钩子：提供 op 链 ↔ 表达式的双向转换。
  *
- * 折叠流程：编辑器打开 → 延迟数帧（等待 rebuild 完成）→ 扫描 op 链 → 替换为 ExprStatement
- * 展开流程：dialog.hidden 监听器（插入到列表头部，先于 save 执行）→ 编译表达式 → 替换回 OperationStatement
- *
- * 跳转索引调整：
- * - 折叠时：N 个 op → 1 个 ExprStmt，destIndex >= i+N 的减 (N-1)
- * - 展开时：1 个 ExprStmt → N 个 op，destIndex > i 的加 (N-1)
+ * 夺舍架构后：
+ * - foldAll() 由 LogicCanvas.load() 直接调用，零延迟
+ * - save() 由 LogicCanvas.save() 调用：unfoldAll → super.save → foldAll
+ * - updateJumpHeights 是 DragLayout 的 public 字段，直接访问
  */
 public class ExprHook{
 
-    private static boolean initialized = false;
-    private static int foldDelay = 0;
+    private static boolean statementRegistered = false;
 
-    // 反射缓存：updateJumpHeights 是 DragLayout 的包私有字段
-    private static Field updateJumpHeightsField;
-    private static boolean updateJumpHeightsFieldChecked = false;
+    // 反射缓存：StatementElem.addressLabel
+    private static Field addressLabelField;
+    private static boolean addressLabelFieldChecked = false;
 
     public static void init(){
-        Core.app.post(ExprHook::tick);
+        registerStatement();
     }
 
-    private static void tick(){
-        Core.app.post(ExprHook::tick);
-
+    /** 将 ExprStatement 注入 LogicIO.allStatements，使其出现在编辑器的积木列表中。 */
+    @SuppressWarnings("unchecked")
+    private static void registerStatement(){
+        if(statementRegistered) return;
         try{
-            LogicDialog dialog = Vars.ui.logic;
-            if(dialog == null) return;
+            Class<?> logicIO = Class.forName("mindustry.gen.LogicIO");
+            Field allStatementsField = logicIO.getField("allStatements");
+            Seq<Prov<LStatement>> allStatements = (Seq<Prov<LStatement>>)allStatementsField.get(null);
 
-            // 初始化：注册 capture 阶段的 hidden 监听器（capture 先于 regular 执行，确保在 save 之前展开）
-            if(!initialized){
-                dialog.addCaptureListener(new VisibilityListener(){
-                    @Override
-                    public boolean hidden(){
-                        unfoldAll(dialog.canvas);
-                        return false;
-                    }
-                });
-                initialized = true;
+            for(Prov<LStatement> prov : allStatements){
+                if(prov.get() instanceof ExprStatement) return;
             }
 
-            if(dialog.isShown()){
-                if(foldDelay > 0){
-                    foldDelay--;
-                    if(foldDelay == 0){
-                        foldAll(dialog.canvas);
-                    }
-                }
-            }else{
-                foldDelay = 5; // 对话框关闭后重置延迟
-            }
-        }catch(Throwable t){
-            Log.debug("[LogicAssist] ExprHook tick error: @", t);
+            allStatements.add(() -> new ExprStatement());
+            statementRegistered = true;
+            Log.info("[LogicAssist] ExprStatement registered to LogicIO.allStatements");
+        }catch(Exception e){
+            Log.err("[LogicAssist] Failed to register ExprStatement", e);
         }
     }
 
     // ===== 折叠：op 链 → ExprStatement =====
 
-    private static void foldAll(LCanvas canvas){
+    public static void foldAll(LCanvas canvas){
         if(canvas == null || canvas.statements == null) return;
 
         Seq<Element> children = canvas.statements.getChildren();
         if(children.isEmpty()) return;
 
-        // 先 saveUI 同步所有跳转的 destIndex
         saveUIAll(canvas);
 
         boolean changed = false;
@@ -90,7 +74,6 @@ public class ExprHook{
                 continue;
             }
 
-            // 从 i 开始查找表达式链
             List<ExprCompiler.OpLine> ops = new ArrayList<>();
             int j = i;
             while(j < children.size){
@@ -102,7 +85,6 @@ public class ExprHook{
                 ops.add(new ExprCompiler.OpLine(
                     opStmt.op.name(), opStmt.dest, opStmt.a, opStmt.b));
 
-                // 链终止：dest 不是临时变量
                 if(!ExprCompiler.isTemp(opStmt.dest)){
                     j++;
                     break;
@@ -112,10 +94,8 @@ public class ExprHook{
 
             int chainLen = j - i;
             if(chainLen >= 2){
-                // 尝试逆向重建表达式
                 String expr = ExprCompiler.rebuild(ops);
                 if(expr != null){
-                    // 成功重建，执行折叠
                     String dest = ops.get(ops.size() - 1).dest;
 
                     ExprStatement exprStmt = new ExprStatement();
@@ -123,21 +103,19 @@ public class ExprHook{
                     exprStmt.expr = expr;
                     exprStmt.lastOps = ops;
 
-                    // 移除旧的 StatementElem
                     for(int k = 0; k < chainLen; k++){
                         ((StatementElem)children.get(i)).remove();
                     }
 
-                    // 在位置 i 插入新的 ExprStatement
                     canvas.addAt(i, exprStmt);
 
-                    // 调整跳转索引
-                    adjustJumpIndices(canvas, i + chainLen - 1, -(chainLen - 1));
-                    // 指向链内部的跳转改为指向 ExprStatement
+                    // 关键修复：先钳制再调整
+                    // 1. 先钳制：destIndex 指向 op 链内部 [i, i+chainLen-1] 的改为 i
                     clampJumpIndices(canvas, i, i + chainLen - 1, i);
+                    // 2. 后调整：destIndex 在链后面的 ( > i+chainLen-1 ) 减 (chainLen-1)
+                    adjustJumpIndices(canvas, i + chainLen - 1, -(chainLen - 1));
 
                     changed = true;
-                    // i 不变，新元素在位置 i
                 }
             }
             i++;
@@ -145,20 +123,20 @@ public class ExprHook{
 
         if(changed){
             setupUIAll(canvas);
-            markUpdateJumpHeights(canvas);
+            updateAddressLabels(canvas);
+            canvas.statements.updateJumpHeights = true;
             Log.debug("[LogicAssist] Expression chains folded");
         }
     }
 
     // ===== 展开：ExprStatement → op 链 =====
 
-    private static void unfoldAll(LCanvas canvas){
+    public static void unfoldAll(LCanvas canvas){
         if(canvas == null || canvas.statements == null) return;
 
         Seq<Element> children = canvas.statements.getChildren();
         if(children.isEmpty()) return;
 
-        // 先 saveUI 同步所有跳转的 destIndex
         saveUIAll(canvas);
 
         boolean changed = false;
@@ -169,12 +147,10 @@ public class ExprHook{
 
             ExprStatement exprStmt = (ExprStatement)elem.st;
 
-            // 编译表达式
             List<ExprCompiler.OpLine> ops;
             try{
                 ops = ExprCompiler.compile(exprStmt.dest, exprStmt.expr);
             }catch(Exception e){
-                // 编译失败：使用 lastOps 或跳过
                 ops = exprStmt.lastOps;
                 if(ops == null || ops.isEmpty()){
                     Log.warn("[LogicAssist] Failed to unfold expression: @", exprStmt.expr);
@@ -184,10 +160,8 @@ public class ExprHook{
 
             int chainLen = ops.size();
 
-            // 移除 ExprStatementElem
             elem.remove();
 
-            // 插入 OperationStatement StatementElems
             for(int k = 0; k < chainLen; k++){
                 ExprCompiler.OpLine line = ops.get(k);
                 OperationStatement opStmt = new OperationStatement();
@@ -199,24 +173,21 @@ public class ExprHook{
                 canvas.addAt(i + k, opStmt);
             }
 
-            // 调整跳转索引：destIndex > i 的加 (chainLen - 1)
             adjustJumpIndices(canvas, i, chainLen - 1);
 
             changed = true;
-            // 跳过已插入的元素
             i += chainLen - 1;
         }
 
         if(changed){
             setupUIAll(canvas);
-            markUpdateJumpHeights(canvas);
+            canvas.statements.updateJumpHeights = true;
             Log.debug("[LogicAssist] Expression statements unfolded");
         }
     }
 
     // ===== 跳转索引调整 =====
 
-    /** destIndex > threshold 的加上 delta */
     private static void adjustJumpIndices(LCanvas canvas, int threshold, int delta){
         if(delta == 0) return;
         Seq<Element> children = canvas.statements.getChildren();
@@ -232,7 +203,6 @@ public class ExprHook{
         }
     }
 
-    /** destIndex 在 [lo, hi] 范围内的设为 value */
     private static void clampJumpIndices(LCanvas canvas, int lo, int hi, int value){
         Seq<Element> children = canvas.statements.getChildren();
         for(Element child : children){
@@ -247,23 +217,56 @@ public class ExprHook{
         }
     }
 
-    // ===== 工具方法 =====
+    // ===== 行号显示：更新所有积木的 addressLabel 为 mlog 行号 =====
 
-    /** 通过反射设置 updateJumpHeights = true（DragLayout 包私有字段） */
-    private static void markUpdateJumpHeights(LCanvas canvas){
-        try{
-            if(!updateJumpHeightsFieldChecked){
-                updateJumpHeightsFieldChecked = true;
-                updateJumpHeightsField = LCanvas.DragLayout.class.getDeclaredField("updateJumpHeights");
-                updateJumpHeightsField.setAccessible(true);
+    /** 折叠后更新所有积木的地址标签，显示展开后的真实 mlog 行号。
+     *  - ExprStatement 显示行号区间（如 "0→2"）
+     *  - 其他积木显示单行号
+     *  - 后面积木的行号自动跳过 Expr 展开的行数
+     */
+    public static void updateAddressLabels(LCanvas canvas){
+        if(canvas == null || canvas.statements == null) return;
+        Seq<Element> children = canvas.statements.getChildren();
+
+        int mlogLine = 0;
+        for(Element child : children){
+            if(!(child instanceof StatementElem)) continue;
+            StatementElem elem = (StatementElem)child;
+
+            if(elem.st instanceof ExprStatement){
+                ExprStatement exprStmt = (ExprStatement)elem.st;
+                int lineCount = (exprStmt.lastOps != null) ? exprStmt.lastOps.size() : 1;
+                int endLine = mlogLine + lineCount - 1;
+                // 多行显示区间，单行显示数字
+                setAddressLabel(elem, lineCount > 1 ? (mlogLine + "→" + endLine) : (mlogLine + ""));
+                mlogLine += lineCount;
+            }else{
+                setAddressLabel(elem, mlogLine + "");
+                mlogLine++;
             }
-            if(updateJumpHeightsField != null){
-                updateJumpHeightsField.set(canvas.statements, true);
-            }
-        }catch(Exception e){
-            Log.debug("[LogicAssist] Failed to set updateJumpHeights: @", e);
         }
     }
+
+    /** 通过反射设置 StatementElem.addressLabel 的文本 */
+    private static void setAddressLabel(StatementElem elem, String text){
+        try{
+            if(!addressLabelFieldChecked){
+                addressLabelFieldChecked = true;
+                addressLabelField = StatementElem.class.getDeclaredField("addressLabel");
+                addressLabelField.setAccessible(true);
+            }
+            if(addressLabelField != null){
+                Label label = (Label)addressLabelField.get(elem);
+                if(label != null){
+                    label.setText(text);
+                }
+            }
+        }catch(Exception e){
+            // 反射失败，保持原版显示
+        }
+    }
+
+    // ===== 工具方法 =====
 
     private static void saveUIAll(LCanvas canvas){
         for(Element child : canvas.statements.getChildren()){

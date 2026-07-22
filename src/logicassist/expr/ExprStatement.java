@@ -13,16 +13,19 @@ import java.util.*;
  * 折叠态：[dest] = [expr text field]
  * 展开态：op cos _ a 0 / op mul _ _ 10 / op add x _ x
  *
- * 关键：write() 输出 op 链文本，保证保存的代码始终是标准 mlog。
+ * 关键设计：
+ * - write() 输出 op 链文本，保证保存的代码始终是标准 mlog
+ * - copy() 直接复制字段，不走 write→read 序列化（防止复制时展开）
+ * - 行号显示由 ExprHook.updateAddressLabels() 统一管理，不在此类处理
  */
 public class ExprStatement extends LStatement{
 
     /** 目标变量名 */
     public String dest = "result";
     /** 表达式字符串 */
-    public String expr = "";
+    public String expr = "0";
 
-    /** 上次编译的 op 链（用于 fallback 和调试） */
+    /** 上次编译的 op 链（用于 fallback、行号计算和调试） */
     public transient List<ExprCompiler.OpLine> lastOps;
 
     @Override
@@ -32,7 +35,6 @@ public class ExprStatement extends LStatement{
             lines = ExprCompiler.compile(dest, expr);
             lastOps = lines;
         }catch(Exception e){
-            // 编译失败：使用上次成功的 ops，或输出 fallback
             lines = lastOps;
             if(lines == null || lines.isEmpty()){
                 builder.append("op add ").append(dest).append(" ").append(dest).append(" 0");
@@ -48,13 +50,12 @@ public class ExprStatement extends LStatement{
     @Override
     public void build(Table table){
         table.left();
-        // dest 字段（使用 LStatement.field 以保持样式一致）
+        // dest 字段
         field(table, dest, str -> dest = str);
         table.add(" = ");
         // 表达式文本框（不使用 field() 以避免空格被替换为下划线）
         table.field(expr, str -> {
             expr = str;
-            // 实时编译尝试，更新 lastOps
             try{
                 lastOps = ExprCompiler.compile(dest, expr);
             }catch(Exception e){
@@ -64,13 +65,26 @@ public class ExprStatement extends LStatement{
     }
 
     @Override
+    public LStatement copy(){
+        ExprStatement copy = new ExprStatement();
+        copy.dest = this.dest;
+        copy.expr = this.expr;
+        copy.lastOps = this.lastOps;
+        return copy;
+    }
+
+    @Override
     public LInstruction build(LAssembler builder){
-        // 执行时不直接调用——write() 输出 op 链后由 LExecutor 重新解析
         return null;
     }
 
     @Override
     public String name(){
         return "Expr";
+    }
+
+    @Override
+    public LCategory category(){
+        return LCategory.operation;
     }
 }
