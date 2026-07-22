@@ -100,11 +100,7 @@ public class BoxSelect{
     private static boolean initialized = false;
     private static InputListener captureListener;
 
-    // 反射缓存
-    private static Field draggingField;
-    private static boolean draggingFieldChecked = false;
-    private static Field privilegedField;
-    private static boolean reflectionChecked = false;
+    // 反射缓存（仅 vScrollBounds 仍需反射，ScrollPane 内部字段）
     private static Field vScrollBoundsField;
 
     // ==================================================================
@@ -1310,42 +1306,15 @@ public class BoxSelect{
     }
 
     private static boolean isPrivileged(LCanvas canvas){
-        if(!reflectionChecked){
-            reflectionChecked = true;
-            try{
-                privilegedField = LCanvas.class.getDeclaredField("privileged");
-                privilegedField.setAccessible(true);
-            }catch(NoSuchFieldException e){
-                Log.info("[LogicAssist] Failed to access privileged field: " + e);
-            }
-        }
-        if(privilegedField != null){
-            try{
-                return privilegedField.getBoolean(canvas);
-            }catch(Exception e){
-                // 忽略
-            }
+        if(canvas instanceof LogicCanvas){
+            return ((LogicCanvas)canvas).isPrivilegedCanvas();
         }
         return false;
     }
 
     private static void clearDraggingField(LCanvas canvas){
-        if(canvas == null) return;
-        if(!draggingFieldChecked){
-            draggingFieldChecked = true;
-            try{
-                draggingField = LCanvas.class.getDeclaredField("dragging");
-                draggingField.setAccessible(true);
-            }catch(NoSuchFieldException e){
-                Log.info("[LogicAssist] Failed to access dragging field: " + e);
-            }
-        }
-        if(draggingField != null){
-            try{
-                draggingField.set(canvas, null);
-            }catch(Exception e){
-                // 忽略
-            }
+        if(canvas instanceof LogicCanvas){
+            ((LogicCanvas)canvas).clearDraggingField();
         }
     }
 }

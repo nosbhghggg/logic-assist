@@ -38,7 +38,7 @@ public class LogicAssistMod extends Mod{
             replaceCanvas();
 
             JumpLineColor.setupSettings();
-            JumpLineColor.startLoop();
+            // JumpLineColor.startLoop() 已内联到 LogicCanvas.draw()
             BoxSelect.init();
             ExprHook.init();
 
