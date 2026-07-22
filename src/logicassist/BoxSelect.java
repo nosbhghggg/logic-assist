@@ -908,30 +908,15 @@ public class BoxSelect{
         float w = maxX - minX + pad * 2;
         float h = maxY - minY + pad * 2;
 
-        // 建造光束效果：Pal.accent 半透明背景 + 扫描线 + 边框
-        float pulse = Mathf.absin(Time.time, 10f, 0.15f);
-
-        // 1. 半透明背景（低 alpha，不遮挡积木）
-        Draw.color(Pal.accent);
-        Draw.alpha(0.08f);
+        // 选中框：半透明填充 + 边框
+        Color modeColor = getModeColor();
+        Draw.color(modeColor);
+        Draw.alpha(0.15f);
         Fill.crect(x, y, w, h);
 
-        // 2. 扫描线（从下到上循环移动，模拟建造光束）
-        float scanProgress = (Time.time % 60f) / 60f;  // 0..1 循环
-        float scanY = y + scanProgress * h;
-        Draw.color(Pal.accent);
-        Draw.alpha(0.5f);
-        Fill.crect(x, scanY - Scl.scl(2f), w, Scl.scl(4f));
-        // 扫描线下方拖尾渐变
-        for(int i = 1; i <= 5; i++){
-            Draw.alpha(0.4f * (1f - i / 6f));
-            Fill.crect(x, scanY - Scl.scl(2f) - i * Scl.scl(3f), w, Scl.scl(3f));
-        }
-
-        // 3. 边框
-        Draw.color(Pal.accent);
-        Draw.alpha(0.6f + pulse);
-        Lines.stroke(Scl.scl(1.5f), Pal.accent);
+        Draw.color(modeColor);
+        Draw.alpha(0.8f);
+        Lines.stroke(Scl.scl(1.5f), modeColor);
         Lines.rect(x, y, w, h);
         Draw.reset();
     }
