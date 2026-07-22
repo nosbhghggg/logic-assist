@@ -105,6 +105,7 @@ public class BoxSelect{
     private static boolean draggingFieldChecked = false;
     private static Field privilegedField;
     private static boolean reflectionChecked = false;
+    private static Field vScrollBoundsField;
 
     // ==================================================================
     // 初始化
@@ -260,9 +261,14 @@ public class BoxSelect{
             return false;
         }
 
-        // 滚动条是 ScrollPane 的一部分，点击滚动条时放行给原版处理
-        if(target instanceof ScrollPane){
-            return false;
+        // 点击在滚动条区域时放行给原版处理（滚动条在 ScrollPane 右侧）
+        if(canvas.pane != null && canvas.pane.hasScroll()){
+            float paneX = canvas.pane.x;
+            float paneW = canvas.pane.getWidth();
+            // 滚动条区域：右侧 14px
+            if(stageCoords.x > paneX + paneW - 14f){
+                return false;
+            }
         }
 
         // 沿祖先链查找 StatementElem
@@ -914,27 +920,31 @@ public class BoxSelect{
         Draw.reset();
     }
 
-    /** 绘制彩色滚动条：在 ScrollPane 的垂直滚动条轨道上，按每个积木的比例绘制对应类别颜色。
-     *  滚动条滑块（knob）改为半透明，可以看到下方的颜色段。 */
+    /** 绘制彩色滚动条：在 ScrollPane 的垂直滚动条轨道上，按每个积木的比例绘制对应类别颜色。 */
     private static void drawColorScrollbar(LCanvas canvas){
         ScrollPane pane = canvas.pane;
         if(pane == null || !pane.hasScroll()) return;
 
-        // 获取 ScrollPane 在 stage 中的位置和尺寸
-        float paneX = pane.x;
-        float paneY = pane.y;
-        float paneW = pane.getWidth();
-        float paneH = pane.getHeight();
+        // 用反射读取 vScrollBounds（ScrollPane 内部的滚动条轨道 Rect，本地坐标）
+        Rect vScrollBounds = null;
+        try{
+            if(vScrollBoundsField == null){
+                vScrollBoundsField = ScrollPane.class.getDeclaredField("vScrollBounds");
+                vScrollBoundsField.setAccessible(true);
+            }
+            vScrollBounds = (Rect)vScrollBoundsField.get(pane);
+        }catch(Exception e){
+            return;
+        }
+        if(vScrollBounds == null || vScrollBounds.width <= 0 || vScrollBounds.height <= 0) return;
 
-        // 滚动条宽度（近似，原版约 10-12px）
-        float scrollbarW = 10f;
-        // 滚动条 X 位置（右侧）
-        float scrollbarX = paneX + paneW - scrollbarW - 2f;
-        // 滚动条 Y 范围
-        float scrollbarTop = paneY + paneH - 2f;
-        float scrollbarBottom = paneY + 2f;
-        float scrollbarH = scrollbarTop - scrollbarBottom;
-        if(scrollbarH <= 0) return;
+        // 将 vScrollBounds（本地坐标）转换为 stage 坐标
+        Vec2 bl = pane.localToStageCoordinates(Tmp.v1.set(vScrollBounds.x, vScrollBounds.y));
+        float scrollbarX = bl.x;
+        float scrollbarBottom = bl.y;
+        float scrollbarW = vScrollBounds.width;
+        float scrollbarH = vScrollBounds.height;
+        float scrollbarTop = scrollbarBottom + scrollbarH;
 
         // 计算总高度和每个积木的位置
         Seq<Element> children = canvas.statements.getChildren();
@@ -947,11 +957,6 @@ public class BoxSelect{
         }
         totalHeight -= space;
         if(totalHeight <= 0) return;
-
-        // 当前滚动偏移
-        float scrollY = pane.getScrollY();
-        float maxY = pane.getMaxY();
-        float visibleH = pane.getScrollHeight();
 
         // 绘制每个积木对应的颜色段（用 ScissorStack 裁剪到滚动条可视区域内）
         Rect clipRect = Tmp.r1.set(scrollbarX, scrollbarBottom, scrollbarW, scrollbarH);
@@ -972,7 +977,6 @@ public class BoxSelect{
 
             Draw.color(c);
             Draw.alpha(0.35f);
-            // 绘制颜色段（从下往上，与积木顺序一致）
             Fill.crect(scrollbarX, elemTop - elemColorH, scrollbarW, elemColorH);
 
             cy += elemH + space;
