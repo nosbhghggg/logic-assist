@@ -45,6 +45,7 @@ public class JumpLineColor{
     private static final float GOLDEN_ANGLE = 137.508f;
     private static final Map<Integer, Color> indexColorCache = new HashMap<>();
     private static final Map<String, Color> blockColorCache = new HashMap<>();
+    private static boolean wasDialogShown = false;
 
     // ---------- Reflection fallback (for non-standard LStatement subclasses) ----------
     private static Field destField;
@@ -287,7 +288,16 @@ public class JumpLineColor{
 
                 try{
                     LogicDialog dialog = Vars.ui.logic;
-                    if(dialog == null || !dialog.isShown() || dialog.canvas == null) return;
+                    if(dialog == null || !dialog.isShown() || dialog.canvas == null){
+                        // 对话框关闭时清空颜色缓存，避免积木增删后旧缓存残留
+                        if(wasDialogShown){
+                            indexColorCache.clear();
+                            blockColorCache.clear();
+                            wasDialogShown = false;
+                        }
+                        return;
+                    }
+                    wasDialogShown = true;
                     patchAllCurves(dialog.canvas);
                 }catch(Exception e){
                     Log.info("[LogicAssist] Tick error: " + e);

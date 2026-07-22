@@ -191,6 +191,13 @@ public class BoxSelect{
         overlay.visible = true;
         Core.scene.add(overlay);
         overlay.update(() -> {
+            // 对话框未显示时跳过，避免无意义的 setSize + toFront
+            LogicDialog dialog = Vars.ui.logic;
+            if(dialog == null || !dialog.isShown()){
+                overlay.visible = false;
+                return;
+            }
+            overlay.visible = true;
             overlay.setSize(Core.graphics.getWidth(), Core.graphics.getHeight());
             overlay.toFront();
         });
@@ -925,10 +932,13 @@ public class BoxSelect{
             elem.cullable = false;
             elem.x += elem.translation.x;
             elem.y += elem.translation.y;
-            elem.draw();
-            elem.x -= elem.translation.x;
-            elem.y -= elem.translation.y;
-            elem.cullable = oldCullable;
+            try{
+                elem.draw();
+            }finally{
+                elem.x -= elem.translation.x;
+                elem.y -= elem.translation.y;
+                elem.cullable = oldCullable;
+            }
         }
         Draw.reset();
 
@@ -941,10 +951,13 @@ public class BoxSelect{
     private static void drawCopyPreview(LCanvas canvas){
         if(selected.isEmpty()) return;
 
+        // 用局部变量而非 Tmp，避免跨调用被覆盖
         float mx = Core.input.mouseX();
         float my = Core.input.mouseY();
-        Vec2 stageMouse = Core.scene.screenToStageCoordinates(Tmp.v3.set(mx, my));
-        Vec2 localMouse = canvas.statements.stageToLocalCoordinates(Tmp.v3.set(stageMouse.x, stageMouse.y));
+        Vec2 stageMouse = new Vec2();
+        Core.scene.screenToStageCoordinates(stageMouse.set(mx, my));
+        Vec2 localMouse = new Vec2();
+        canvas.statements.stageToLocalCoordinates(localMouse.set(stageMouse));
         float dx = localMouse.x - dragStartLocalX;
         float dy = localMouse.y - dragStartLocalY;
 
@@ -961,10 +974,13 @@ public class BoxSelect{
             elem.cullable = false;
             elem.x += dx;
             elem.y += dy;
-            elem.draw();
-            elem.x -= dx;
-            elem.y -= dy;
-            elem.cullable = oldCullable;
+            try{
+                elem.draw();
+            }finally{
+                elem.x -= dx;
+                elem.y -= dy;
+                elem.cullable = oldCullable;
+            }
         }
         Draw.reset();
 
@@ -1198,8 +1214,12 @@ public class BoxSelect{
         canvas.statements.updateJumpHeights = true;
         canvas.statements.invalidate();
         canvas.statements.validate();
+        // layout() 发现 height 变化后调用 invalidateHierarchy() 标记父节点，
+        // 但自身 layout() 已执行完毕（用的是旧 height）。需要第二次 validate 用新 height 重新布局。
         canvas.statements.invalidate();
         canvas.statements.validate();
+        // 更新跳转线位置（基于最终布局）
+        canvas.statements.jumps.act(0f);
     }
 
     /** 更新所有积木的 JumpStatement destIndex（移动/删除后调用） */
