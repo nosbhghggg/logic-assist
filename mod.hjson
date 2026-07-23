@@ -16,7 +16,7 @@ subtitle: "Logic editor power tools"
 
 version: "1.0.0"
 
-minGameVersion: "157.1"
+minGameVersion: "159"
 
 // Java 模组标记
 java: true
