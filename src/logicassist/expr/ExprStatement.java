@@ -3,7 +3,8 @@ package logicassist.expr;
 import arc.scene.ui.*;
 import arc.scene.ui.layout.*;
 import mindustry.logic.*;
-import mindustry.logic.LExecutor.LInstruction;
+import mindustry.logic.LExecutor.*;
+import mindustry.logic.LStatements.*;
 
 import java.util.*;
 
@@ -75,7 +76,23 @@ public class ExprStatement extends LStatement{
 
     @Override
     public LInstruction build(LAssembler builder){
-        return null;
+        // 正常流程下不会走到这里：LogicCanvas.save() 会先 unfoldAll()，
+        // ExprStatement 会被替换为 OperationStatement。
+        // 但如果代码通过 customParsers 加载后直接执行（不经过编辑器 save），
+        // 返回一个 no-op 指令防止静默跳过。
+        List<ExprCompiler.OpLine> ops;
+        try{
+            ops = ExprCompiler.compile(dest, expr);
+        }catch(Exception e){
+            ops = lastOps;
+        }
+        if(ops == null || ops.isEmpty()){
+            return new OpI(LogicOp.add, builder.var(dest), builder.var("0"), builder.var(dest));
+        }
+        // 返回第一条 op 的指令，后续 op 在 write() 中输出为文本
+        ExprCompiler.OpLine first = ops.get(0);
+        return new OpI(LogicOp.valueOf(first.op),
+                        builder.var(first.a), builder.var(first.b), builder.var(first.dest));
     }
 
     @Override

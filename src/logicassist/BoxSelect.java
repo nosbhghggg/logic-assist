@@ -489,7 +489,7 @@ public class BoxSelect{
         int copySize = sorted.size();
 
         if(children.size + copySize > LExecutor.maxInstructions){
-            Log.info("[LogicAssist] Duplicate aborted: would exceed maxInstructions");
+            Log.debug("[LogicAssist] Duplicate aborted: would exceed maxInstructions");
             return;
         }
 
@@ -512,7 +512,7 @@ public class BoxSelect{
         selected.clear();
         reselectRange(canvas, insertPos, copies.size);
         enterSelectedState(canvas);
-        Log.info("[LogicAssist] Duplicated " + copies.size + " blocks below selection.");
+        Log.debug("[LogicAssist] Duplicated " + copies.size + " blocks below selection.");
     }
 
     // ==================================================================
@@ -560,13 +560,17 @@ public class BoxSelect{
         state = State.IDLE;
     }
 
-    private static void resetState(LCanvas canvas){
-        clearDraggingField(canvas);
-        restoreButtonIcons(canvas);
-        // 重置所有积木的 translation（非选中积木可能被 applyInsertShiftViaTranslation 设了 translation）
+    /** 重置所有积木的 translation（applyInsertShiftViaTranslation 可能给非选中积木设了 translation） */
+    private static void resetAllTranslations(LCanvas canvas){
         for(Element child : canvas.statements.getChildren()){
             child.setTranslation(0, 0);
         }
+    }
+
+    private static void resetState(LCanvas canvas){
+        clearDraggingField(canvas);
+        restoreButtonIcons(canvas);
+        resetAllTranslations(canvas);
         selected.clear();
         state = State.IDLE;
         dragInsertPos = -1;
@@ -612,10 +616,8 @@ public class BoxSelect{
         canvas.statements.invalidate();
         canvas.statements.validate();
 
-        // 重置所有积木的 translation（干净起点，避免累积）
-        for(Element child : canvas.statements.getChildren()){
-            child.setTranslation(0, 0);
-        }
+        // 干净起点，避免累积
+        resetAllTranslations(canvas);
 
         if(state == State.DRAGGING_MOVE){
             // 移动模式：跳过选中积木布局（它们用 translation 跟随鼠标，不占原位）
@@ -1004,40 +1006,13 @@ public class BoxSelect{
 
     /** 在正确的 transform 矩阵内重画选中积木，确保积木画在插入阴影上方 */
     private static void redrawSelectedBlocksOnTop(LCanvas canvas){
-        if(selected.isEmpty()) return;
-
-        Mat oldTrans = tmpMat.set(Draw.trans());
-
-        Vec2 origin = canvas.statements.localToStageCoordinates(Tmp.v1.set(0, 0));
-        tmpMat2.idt().setToTranslation(origin.x, origin.y);
-        Draw.trans(tmpMat2);
-
-        Draw.reset();
-        for(StatementElem elem : selected){
-            boolean oldCullable = elem.cullable;
-            elem.cullable = false;
-            elem.x += elem.translation.x;
-            elem.y += elem.translation.y;
-            try{
-                elem.draw();
-            }finally{
-                elem.x -= elem.translation.x;
-                elem.y -= elem.translation.y;
-                elem.cullable = oldCullable;
-            }
-        }
-        Draw.reset();
-
-        Draw.trans(oldTrans);
+        drawElementsWithOffset(canvas, 0, 0, 1f);
     }
 
-    /** 复制模式：绘制半透明的积木预览跟随鼠标。
-     *  原积木保持原位不动，预览只是视觉提示"副本会放在这里"。
-     *  用选中积木的样式 + 半透明，在鼠标偏移位置绘制。 */
+    /** 复制模式：绘制半透明的积木预览跟随鼠标。 */
     private static void drawCopyPreview(LCanvas canvas){
         if(selected.isEmpty()) return;
 
-        // 用局部变量而非 Tmp，避免跨调用被覆盖
         float mx = Core.input.mouseX();
         float my = Core.input.mouseY();
         Vec2 stageMouse = new Vec2();
@@ -1047,6 +1022,14 @@ public class BoxSelect{
         float dx = localMouse.x - dragStartLocalX;
         float dy = localMouse.y - dragStartLocalY;
 
+        drawElementsWithOffset(canvas, dx, dy, 0.5f);
+    }
+
+    /** 统一的绘制方法：保存矩阵 → 设置 translation → 临时修改 x/y → draw → finally 恢复
+     *  @param alpha 1f = 不透明（重画在顶层），0.5f = 半透明（复制预览） */
+    private static void drawElementsWithOffset(LCanvas canvas, float dx, float dy, float alpha){
+        if(selected.isEmpty()) return;
+
         Mat oldTrans = tmpMat.set(Draw.trans());
 
         Vec2 origin = canvas.statements.localToStageCoordinates(Tmp.v1.set(0, 0));
@@ -1054,7 +1037,7 @@ public class BoxSelect{
         Draw.trans(tmpMat2);
 
         Draw.reset();
-        Draw.alpha(0.5f);
+        Draw.alpha(alpha);
         for(StatementElem elem : selected){
             boolean oldCullable = elem.cullable;
             elem.cullable = false;
@@ -1079,10 +1062,8 @@ public class BoxSelect{
     private static void executeDragMove(LCanvas canvas, int insertPos){
         clearDraggingField(canvas);
 
-        // 重置所有积木的 translation（updateDrag 中 applyInsertShiftViaTranslation 给非选中积木也设了 translation）
-        for(Element child : canvas.statements.getChildren()){
-            child.setTranslation(0, 0);
-        }
+        // updateDrag 中 applyInsertShiftViaTranslation 给非选中积木也设了 translation
+        resetAllTranslations(canvas);
 
         List<StatementElem> sorted = getSortedSelected(canvas);
         Seq<Element> children = canvas.statements.getChildren();
@@ -1104,7 +1085,7 @@ public class BoxSelect{
         saveAllJumpUI(canvas);
         reselectRange(canvas, actualInsert, count);
         enterSelectedState(canvas);
-        Log.info("[LogicAssist] Drag-moved " + count + " blocks to position " + actualInsert);
+        Log.debug("[LogicAssist] Drag-moved " + count + " blocks to position " + actualInsert);
     }
 
     // ==================================================================
@@ -1133,10 +1114,7 @@ public class BoxSelect{
     private static void executeDragCopy(LCanvas canvas, int insertPos){
         clearDraggingField(canvas);
 
-        // 重置所有积木的 translation（updateDrag 中 applyInsertShiftViaTranslation 给非选中积木也设了 translation）
-        for(Element child : canvas.statements.getChildren()){
-            child.setTranslation(0, 0);
-        }
+        resetAllTranslations(canvas);
 
         if(clipboardData == null || clipboardData.isEmpty()){
             enterSelectedState(canvas);
@@ -1145,7 +1123,7 @@ public class BoxSelect{
 
         int currentSize = canvas.statements.getChildren().size;
         if(currentSize + clipboardSize > LExecutor.maxInstructions){
-            Log.info("[LogicAssist] Copy aborted: would exceed maxInstructions");
+            Log.debug("[LogicAssist] Copy aborted: would exceed maxInstructions");
             enterSelectedState(canvas);
             return;
         }
@@ -1177,16 +1155,13 @@ public class BoxSelect{
         clipboardSelectedIndices = null;
 
         enterSelectedState(canvas);
-        Log.info("[LogicAssist] Drag-copied " + copies.size + " blocks to position " + insertPos);
+        Log.debug("[LogicAssist] Drag-copied " + copies.size + " blocks to position " + insertPos);
     }
 
     private static void cancelDrag(LCanvas canvas){
         clearDraggingField(canvas);
 
-        // 重置所有积木的 translation（updateDrag 中 applyInsertShiftViaTranslation 给非选中积木也设了 translation）
-        for(Element child : canvas.statements.getChildren()){
-            child.setTranslation(0, 0);
-        }
+        resetAllTranslations(canvas);
         clipboardData = null;
         clipboardSize = 0;
         clipboardSelectedIndices = null;
@@ -1199,10 +1174,7 @@ public class BoxSelect{
     private static void deleteSelected(LCanvas canvas){
         clearDraggingField(canvas);
 
-        // 重置所有积木的 translation（updateDrag 中可能给非选中积木设了 translation）
-        for(Element child : canvas.statements.getChildren()){
-            child.setTranslation(0, 0);
-        }
+        resetAllTranslations(canvas);
 
         List<StatementElem> sorted = getSortedSelected(canvas);
         int count = sorted.size();
@@ -1216,7 +1188,7 @@ public class BoxSelect{
 
         selected.clear();
         state = State.IDLE;
-        Log.info("[LogicAssist] Deleted " + count + " blocks.");
+        Log.debug("[LogicAssist] Deleted " + count + " blocks.");
     }
 
     // ==================================================================

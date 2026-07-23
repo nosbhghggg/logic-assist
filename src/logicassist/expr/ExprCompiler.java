@@ -520,9 +520,6 @@ public class ExprCompiler{
                 if(lp < prec || (lp == prec && b.op.equals("pow")))
                     left = "(" + left + ")";
             }
-            if(b.l instanceof Unary && ((Unary)b.l).op.equals("neg") && prec < PREC_UNARY){
-                // -a + b 需要写成 (-a) + b？不需要，因为 - 优先级更高
-            }
 
             // 右子节点加括号
             if(b.r instanceof Binary){

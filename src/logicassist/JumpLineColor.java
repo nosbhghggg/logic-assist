@@ -45,7 +45,6 @@ public class JumpLineColor{
     private static final float GOLDEN_ANGLE = 137.508f;
     private static final Map<Integer, Color> indexColorCache = new HashMap<>();
     private static final Map<String, Color> blockColorCache = new HashMap<>();
-    private static boolean wasDialogShown = false;
 
     // ---------- Reflection fallback (for non-standard LStatement subclasses) ----------
     private static Field destField;
@@ -269,43 +268,12 @@ public class JumpLineColor{
     }
 
     // ==================================================================
-    // Main loop
+    // Cache management
     // ==================================================================
 
-    /**
-     * 启动主循环，每帧检查并 patch 所有 JumpCurve。
-     *
-     * 使用 Core.app.post() 自调度循环（与 JS 版本相同的策略）。
-     * JumpCurve 是按需添加到 jumps 组的（每个 JumpButton 对应一个），
-     * 所以需要持续检查新添加的曲线。
-     */
-    public static void startLoop(){
-        Runnable tick = new Runnable(){
-            @Override
-            public void run(){
-                // 自调度：下一帧继续执行（放在最前面，确保异常也不会中断循环）
-                Core.app.post(this);
-
-                try{
-                    LogicDialog dialog = Vars.ui.logic;
-                    if(dialog == null || !dialog.isShown() || dialog.canvas == null){
-                        // 对话框关闭时清空颜色缓存，避免积木增删后旧缓存残留
-                        if(wasDialogShown){
-                            indexColorCache.clear();
-                            blockColorCache.clear();
-                            wasDialogShown = false;
-                        }
-                        return;
-                    }
-                    wasDialogShown = true;
-                    patchAllCurves(dialog.canvas);
-                }catch(Exception e){
-                    Log.info("[LogicAssist] Tick error: " + e);
-                    // 不再重复 post：开头的 Core.app.post(this) 已保证下一帧继续执行。
-                    // 之前在 catch 里再次 post 会导致异常时循环倍增（每帧 2^n 增长）。
-                }
-            }
-        };
-        Core.app.post(tick);
+    /** 清空颜色缓存，在编辑器关闭时调用，避免积木增删后旧缓存残留 */
+    public static void clearCache(){
+        indexColorCache.clear();
+        blockColorCache.clear();
     }
 }
