@@ -53,10 +53,16 @@ public class LogicCanvas extends LCanvas{
     }
 
     @Override
-    public void draw(){
-        // 必须在 super.draw() 之前更新行号：super.draw() 会绘制所有子元素（含 addressLabel），
-        // 如果在之后更新，本次帧显示的仍是原版 UI 索引
+    public void act(float delta){
+        super.act(delta);
+        // 在 act() 中更新行号：super.act() 已完成所有子元素的 layout()（含 DragLayout.layout()
+        // 设置原版 UI 索引），此时覆盖为 mlog 行号不会被 layout() 再覆盖回去。
+        // draw() 阶段 Label 会用自己的文本重新布局字形缓存，显示正确。
         updateMlogAddresses();
+    }
+
+    @Override
+    public void draw(){
         super.draw();
         JumpLineColor.patchAllCurves(this);
     }
