@@ -624,10 +624,12 @@ public class BoxSelect{
         dragInsertPos = -1;
         dragMoved = false;
 
+        // 拖动模式：dragMode 持久模式 + Ctrl/中键临时覆盖。
+        // 框选框/高亮框颜色由 getModeColor() 实时反映此判断，保证与松手后拖动模式一致。
         boolean ctrlDown = Core.input.keyDown(KeyCode.controlLeft);
         boolean isCopy = ctrlDown || dragMode == DragMode.COPY || button == KeyCode.mouseMiddle;
 
-        // 关键：清除原版 dragging 字段，防止原版 layout 跳过错误积木
+        // 清除原版 dragging 字段，防止原版 layout 跳过错误积木
         clearDraggingField(canvas);
 
         if(isCopy){
@@ -672,10 +674,17 @@ public class BoxSelect{
             dragInsertPos = newInsertPos;
         }
 
-        // 用 translation 腾位（不修改 child.y，避免 layout() 重置导致闪烁）
-        applyInsertShiftViaTranslation(canvas);
+        // 注意：此处不再调用 applyInsertShiftViaTranslation 进行腾位。
+        // 历史上腾位用 translation 下移插入点下方的积木，但带来两个顽固 bug：
+        //   1. JumpCurve.act 用 localToAscendantCoordinates 定位（基于 child.y，不含 translation），
+        //      导致复制模式下跳转线与积木视觉位置错位、看似消失。
+        //   2. 移动模式下选中顶部积木时，腾位 + 松手 reset 的时机与 DragLayout.layout 的
+        //      height/invalidateHierarchy 交互产生顶部空白和整体下偏。
+        // 原版 DragLayout.layout 用 dragging 字段跳过拖动元素并直接改 y 腾位，
+        // 但我们的批量选中场景无法复用单积木 dragging 机制。放弃腾位，改由指示器标示插入位置，
+        // 松手时一次性 insert，位置最稳定。选中积木移动模式仍用 translation 跟随鼠标提供视觉反馈。
 
-        // 强制更新跳转线位置
+        // 更新跳转线位置（原积木未动，位置正确）
         canvas.statements.jumps.act(0f);
         // 计算指示器几何
         updateIndicatorGeometry(canvas);
@@ -724,70 +733,11 @@ public class BoxSelect{
     }
 
     // ==================================================================
-    // 手动布局（跳过选中积木 + 腾位）
+    // 手动布局（已废弃）
     // ==================================================================
-
-    /** 跳过选中积木布局，非选中积木紧凑排列。
-     *  关键：totalHeight 用所有积木高度（含选中），与原版 DragLayout.layout() 一致，
-     *  这样 compact 后非选中积木的位置会预留选中积木的空间，
-     *  腾位时再下移 shiftAmount，净效果为选中积木的位置空出来。 */
-    private static void relayoutNonSelected(LCanvas canvas){
-        Seq<Element> children = canvas.statements.getChildren();
-        float space = Scl.scl(10f);
-        float width = canvas.statements.getWidth();
-
-        // totalHeight 含所有积木（包括选中），与原版 DragLayout.layout() 的 sumf 一致
-        float totalHeight = 0;
-        for(Element e : children){
-            totalHeight += e.getPrefHeight() + space;
-        }
-        totalHeight = Math.max(0, totalHeight - space);
-
-        float cy = 0;
-        for(Element e : children){
-            if(e instanceof StatementElem && selected.contains(e)) continue;
-            e.setSize(width, e.getPrefHeight());
-            e.setPosition(0, totalHeight - cy, Align.topLeft);
-            cy += e.getPrefHeight() + space;
-        }
-    }
-
-    /** 用 translation 腾位（不修改 child.y，避免 layout() 重置导致闪烁）。
-     *  translation 在 Element.draw() 中应用，layout() 不会重置它。
-     *  - 移动模式：dragInsertPos 是非选中索引，跳过选中积木
-     *  - 复制模式：dragInsertPos 是全量索引，不跳过任何积木（含选中积木也要让开） */
-    private static void applyInsertShiftViaTranslation(LCanvas canvas){
-        if(dragInsertPos < 0) return;
-
-        Seq<Element> children = canvas.statements.getChildren();
-        float space = Scl.scl(10f);
-
-        float shiftAmount = 0;
-        for(StatementElem elem : selected){
-            shiftAmount += elem.getHeight() + space;
-        }
-        shiftAmount -= space;
-
-        if(state == State.DRAGGING_COPY){
-            // 复制模式：dragInsertPos 是全量 child 索引，所有积木（含选中）参与腾位
-            for(int i = 0; i < children.size; i++){
-                if(i >= dragInsertPos){
-                    Element child = children.get(i);
-                    child.setTranslation(child.translation.x, child.translation.y - shiftAmount);
-                }
-            }
-        }else{
-            // 移动模式：dragInsertPos 是非选中索引，跳过选中积木
-            int nonSelectedIndex = 0;
-            for(Element child : children){
-                if(child instanceof StatementElem && selected.contains(child)) continue;
-                if(nonSelectedIndex >= dragInsertPos){
-                    child.setTranslation(child.translation.x, child.translation.y - shiftAmount);
-                }
-                nonSelectedIndex++;
-            }
-        }
-    }
+    // 历史上这里曾有 relayoutNonSelected 和 applyInsertShiftViaTranslation 两个方法，
+    // 分别用于 compact 非选中积木和用 translation 腾位。两者都导致顽固 bug（顶部空白、
+    // 跳转线错位），已删除。详见 updateDrag 中的注释说明放弃腾位的原因。
 
     // ==================================================================
     // 指示器几何
@@ -904,9 +854,20 @@ public class BoxSelect{
         drawColorScrollbar(canvas);
     }
 
-    /** 根据当前模式返回框选颜色 */
+    /** 返回框选框/高亮框颜色，实时反映"松手后会进入的拖动模式"。
+     *  拖动中按 state 判断；框选/选中态按 dragMode + Ctrl 实时判断，保证与按钮图标和拖动模式一致。 */
     private static Color getModeColor(){
-        return dragMode == DragMode.COPY ? Pal.heal : Pal.place;
+        boolean isCopy;
+        if(state == State.DRAGGING_MOVE){
+            isCopy = false;
+        }else if(state == State.DRAGGING_COPY){
+            isCopy = true;
+        }else{
+            // 框选/选中态：与 startDrag 的判断保持一致
+            boolean ctrlDown = Core.input.keyDown(KeyCode.controlLeft);
+            isCopy = ctrlDown || dragMode == DragMode.COPY;
+        }
+        return isCopy ? Pal.heal : Pal.place;
     }
 
     private static void drawSelectionBox(LCanvas canvas){

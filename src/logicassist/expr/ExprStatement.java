@@ -2,6 +2,7 @@ package logicassist.expr;
 
 import arc.*;
 import arc.graphics.*;
+import arc.input.*;
 import arc.math.*;
 import arc.scene.*;
 import arc.scene.event.*;
@@ -113,26 +114,39 @@ public class ExprStatement extends LStatement{
         updateLabel.run();
 
         // Stack 叠放 Label 和 TextField，占同一空间
-        // 巧思：覆盖 getPrefWidth() 返回 0，让 Table 不被 Stack 的 prefWidth 撑开
-        // 实际宽度由 cell growX 填满 dest 右边剩余空间，自动适应窗口大小
+        // 覆盖 getPrefWidth() 返回 0，让外层 cell 不被 Stack 的 prefWidth 撑开，
+        // 实际宽度由 growX 填满 dest 右边剩余空间，自动适应窗口大小
         arc.scene.ui.layout.Stack stack = new arc.scene.ui.layout.Stack(){
             @Override
             public float getPrefWidth(){ return 0; }
         };
         stack.add(exprLabel);
         stack.add(exprField);
-        table.add(stack).growX().padLeft(4f).fillX();
+
+        // 用 Table 包裹 Stack 并设置下划线背景：
+        // TextField.visible=false 时不绘制自身背景，需要外层提供白色横杠，
+        // 保证非编辑态（Label）和编辑态（TextField）都有下划线
+        Table exprWrapper = new Table();
+        if(Styles.nodeField.background != null){
+            exprWrapper.setBackground(Styles.nodeField.background);
+        }
+        exprWrapper.add(stack).growX();
+        table.add(exprWrapper).growX().padLeft(4f).fillX();
         exprField.visible = false;
 
-        // 点击 Label → 进入编辑模式
-        exprLabel.addListener(new ClickListener(){
+        // 点击 Label → 进入编辑模式。
+        // 用 InputListener.touchDown 而非 ClickListener.clicked：
+        // 进入编辑后 Label.visible=false，touchUp 事件丢失，ClickListener 的
+        // pressed 状态会卡住，导致无法再次点击进入编辑
+        exprLabel.addListener(new InputListener(){
             @Override
-            public void clicked(InputEvent event, float x, float y){
+            public boolean touchDown(InputEvent event, float x, float y, int pointer, KeyCode button){
                 exprField.setText(expr);
                 exprLabel.visible = false;
                 exprField.visible = true;
                 Core.scene.setKeyboardFocus(exprField);
                 Core.scene.setScrollFocus(exprField);
+                return true;
             }
         });
 
