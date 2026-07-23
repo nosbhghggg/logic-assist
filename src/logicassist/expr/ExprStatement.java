@@ -76,6 +76,8 @@ public class ExprStatement extends LStatement{
         exprLabel.setWrap(true);
         exprLabel.setAlignment(Align.left);
         exprLabel.touchable = Touchable.enabled;
+        // 限制 Label 最大宽度，防止 Stack 被 prefWidth 撑大导致溢出
+        exprLabel.setLayoutEnabled(true);
 
         // 语法错误状态：错误时 Label 文字变红
         final boolean[] hasError = {false};
@@ -111,23 +113,23 @@ public class ExprStatement extends LStatement{
         // 积木总宽 Scl.scl(targetWidth)，减去 dest 字段和 " = " 占用约 130f
         float exprMaxWidth = Scl.scl(LCanvas.useRows() ? 400f : 900f) - Scl.scl(130f);
 
-        // Label cell 和 Field cell：显示态 Label 占满、Field 收缩；编辑态反之
-        Cell<Label> labelCell = table.add(exprLabel).width(exprMaxWidth).padLeft(4f).fill(false).expand(false, false);
-        Cell<TextField> fieldCell = table.add(exprField).padLeft(4f);
-        fieldCell.width(0f); // 初始收缩 Field
-        final boolean[] editing = {false};
+        // Stack 叠放 Label 和 TextField，占同一空间
+        // Stack cell 用固定 width 约束，内部 Label 在此宽度内 wrap
+        arc.scene.ui.layout.Stack stack = new arc.scene.ui.layout.Stack();
+        stack.add(exprLabel);
+        stack.add(exprField);
+        table.add(stack).width(exprMaxWidth).padLeft(4f).fillX();
+        exprField.visible = false;
 
         // 点击 Label → 进入编辑模式
         exprLabel.addListener(new ClickListener(){
             @Override
             public void clicked(InputEvent event, float x, float y){
                 exprField.setText(expr);
-                labelCell.width(0f);
-                fieldCell.width(exprMaxWidth);
-                table.invalidate();
+                exprLabel.visible = false;
+                exprField.visible = true;
                 Core.scene.setKeyboardFocus(exprField);
                 Core.scene.setScrollFocus(exprField);
-                editing[0] = true;
             }
         });
 
@@ -135,12 +137,10 @@ public class ExprStatement extends LStatement{
         final boolean[] wasFocused = {false};
         exprField.update(() -> {
             boolean focused = Core.scene.getKeyboardFocus() == exprField;
-            if(wasFocused[0] && !focused && editing[0]){
-                labelCell.width(exprMaxWidth);
-                fieldCell.width(0f);
-                table.invalidate();
+            if(wasFocused[0] && !focused){
+                exprField.visible = false;
+                exprLabel.visible = true;
                 updateLabel.run();
-                editing[0] = false;
             }
             wasFocused[0] = focused;
         });
