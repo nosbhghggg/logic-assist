@@ -2,30 +2,34 @@ package logicassist;
 
 import arc.scene.*;
 import arc.scene.ui.*;
+import arc.scene.ui.layout.*;
 import arc.struct.*;
 import arc.util.*;
 import logicassist.expr.*;
 import mindustry.logic.*;
 
 import java.lang.reflect.*;
-import java.util.*;
 
 /**
  * 夺舍版 LCanvas：继承原版 LCanvas，覆盖关键生命周期方法。
  *
- * 行号更新策略：
- * 原版 DragLayout.layout() 在 act()/draw() 期间的 validate() 中都可能触发，
- * 通过 updateAddress(i) 设置 addressLabel 文本为 UI 索引。
- * 无法用单一覆盖点（act/draw）修正，因为 layout 时机不确定。
+ * 行号更新策略（v2）：
+ * 原版 DragLayout.layout() 在 validate() 中触发，通过 updateAddress(i)
+ * 将 addressLabel 设为 UI 索引。validate() 可能在 act() 或 draw() 期间调用。
  *
- * 解决方案：给每个 addressLabel 注册 update 回调（每帧执行，在 layout 之后）。
- * 回调中根据积木在列表中的位置计算 mlog 行号。
- * 用 HashSet 追踪已 hook 的 Label，避免重复注册。
+ * 旧方案用 label.update() 回调，但 setText() 触发 invalidateHierarchy()，
+ * 导致同一帧 validate() → layout() → updateAddress() 覆盖我们的文本。
+ * 唯一不被覆盖的情况是 dragging != null 时 layout() 跳过拖动元素。
+ *
+ * 新方案：在 super.draw()（含 layout → updateAddress → drawChildren）之后
+ * 统一更新所有标签。若文本有变，重置 WidgetGroup.invalidated = false，
+ * 防止下一帧 validate() → layout() → updateAddress() 覆盖。
+ * 稳态下文本不变，setText() 空操作，不会触发 invalidation。
  */
 public class LogicCanvas extends LCanvas{
 
     private static Field addressLabelField;
-    private static final Set<Label> hookedLabels = Collections.newSetFromMap(new WeakHashMap<>());
+    private static Field wgInvalidatedField;
 
     static{
         try{
@@ -33,6 +37,12 @@ public class LogicCanvas extends LCanvas{
             addressLabelField.setAccessible(true);
         }catch(Exception e){
             Log.err("[LogicAssist] Failed to access StatementElem.addressLabel", e);
+        }
+        try{
+            wgInvalidatedField = WidgetGroup.class.getDeclaredField("invalidated");
+            wgInvalidatedField.setAccessible(true);
+        }catch(Exception e){
+            Log.err("[LogicAssist] Failed to access WidgetGroup.invalidated", e);
         }
     }
 
@@ -44,7 +54,6 @@ public class LogicCanvas extends LCanvas{
     public void load(String asm){
         super.load(asm);
         ExprHook.foldAll(this);
-        hookAddressLabels();
     }
 
     @Override
@@ -52,7 +61,6 @@ public class LogicCanvas extends LCanvas{
         ExprHook.unfoldAll(this);
         String result = super.save();
         ExprHook.foldAll(this);
-        hookAddressLabels();
         return result;
     }
 
@@ -60,55 +68,27 @@ public class LogicCanvas extends LCanvas{
     public void draw(){
         super.draw();
         JumpLineColor.patchAllCurves(this);
+        updateMlogAddresses();
     }
 
-    /** 为所有未 hook 的 StatementElem 的 addressLabel 注册 update 回调 */
-    private void hookAddressLabels(){
+    /**
+     * 在 super.draw() 之后更新所有积木的 mlog 行号。
+     *
+     * 单次遍历 O(N)，比旧方案的每标签 O(N) 回调（总 O(N²)）更高效。
+     * 表达式积木显示行号区间（如 0->2），普通积木显示单行号。
+     */
+    private void updateMlogAddresses(){
         if(statements == null || addressLabelField == null) return;
         Seq<Element> children = statements.getChildren();
-        for(Element child : children){
-            if(!(child instanceof LCanvas.StatementElem)) continue;
-            LCanvas.StatementElem elem = (LCanvas.StatementElem)child;
-            try{
-                Label label = (Label)addressLabelField.get(elem);
-                if(label == null || hookedLabels.contains(label)) continue;
-                hookedLabels.add(label);
-                label.update(() -> updateSingleAddress(elem, label));
-            }catch(Exception ignored){
-            }
-        }
-    }
+        if(children.isEmpty()) return;
 
-    /** 计算目标积木的 mlog 行号并更新 addressLabel */
-    private void updateSingleAddress(LCanvas.StatementElem target, Label label){
-        if(statements == null) return;
-        Seq<Element> children = statements.getChildren();
+        boolean changed = false;
         int mlogLine = 0;
         for(Element child : children){
             if(!(child instanceof LCanvas.StatementElem)) continue;
             LCanvas.StatementElem elem = (LCanvas.StatementElem)child;
 
-            if(elem == target){
-                String text;
-                if(elem.st instanceof ExprStatement){
-                    ExprStatement exprStmt = (ExprStatement)elem.st;
-                    if(exprStmt.lastOps == null){
-                        try{
-                            exprStmt.lastOps = ExprCompiler.compile(exprStmt.dest, exprStmt.expr);
-                        }catch(Exception ignored){}
-                    }
-                    int lineCount = (exprStmt.lastOps != null) ? exprStmt.lastOps.size() : 1;
-                    int endLine = mlogLine + lineCount - 1;
-                    text = lineCount > 1 ? (mlogLine + "->" + endLine) : (mlogLine + "");
-                }else{
-                    text = mlogLine + "";
-                }
-                if(!label.getText().toString().equals(text)){
-                    label.setText(text);
-                }
-                return;
-            }
-
+            int lineCount = 1;
             if(elem.st instanceof ExprStatement){
                 ExprStatement exprStmt = (ExprStatement)elem.st;
                 if(exprStmt.lastOps == null){
@@ -116,10 +96,33 @@ public class LogicCanvas extends LCanvas{
                         exprStmt.lastOps = ExprCompiler.compile(exprStmt.dest, exprStmt.expr);
                     }catch(Exception ignored){}
                 }
-                mlogLine += (exprStmt.lastOps != null) ? exprStmt.lastOps.size() : 1;
-            }else{
-                mlogLine++;
+                lineCount = (exprStmt.lastOps != null) ? exprStmt.lastOps.size() : 1;
             }
+
+            String text = lineCount > 1
+                ? (mlogLine + "->" + (mlogLine + lineCount - 1))
+                : (mlogLine + "");
+
+            try{
+                Label label = (Label)addressLabelField.get(elem);
+                if(label != null){
+                    String current = label.getText().toString();
+                    if(!current.equals(text)){
+                        label.setText(text);
+                        changed = true;
+                    }
+                }
+            }catch(Exception ignored){}
+
+            mlogLine += lineCount;
+        }
+
+        // setText() 触发了 invalidateHierarchy() → WidgetGroup.invalidated = true。
+        // 重置为 false，防止下一帧 validate() → layout() → updateAddress() 覆盖。
+        if(changed && wgInvalidatedField != null){
+            try{
+                wgInvalidatedField.setBoolean(statements, false);
+            }catch(Exception ignored){}
         }
     }
 }
