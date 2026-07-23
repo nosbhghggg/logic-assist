@@ -380,6 +380,8 @@ public class BoxSelect{
             }else{
                 if(!selected.isEmpty()){
                     state = State.SELECTED;
+                    // 更新选中积木的按钮图标（显示 copy/move 模式）
+                    updateSelectedButtonIcons(canvas);
                 }else{
                     state = State.IDLE;
                 }
@@ -509,7 +511,7 @@ public class BoxSelect{
             selectedIndices[i] = children.indexOf(sorted.get(i), true);
             sorted.get(i).st.saveUI();
             LStatement copy = sorted.get(i).st.copy();
-            Log.info("[LogicAssist] duplicateSelectedBelow: st=@ copy=@", sorted.get(i).st.getClass().getSimpleName(), copy == null ? "null" : copy.getClass().getSimpleName());
+            Log.debug("[LogicAssist] duplicateSelectedBelow: st=@ copy=@", sorted.get(i).st.getClass().getSimpleName(), copy == null ? "null" : copy.getClass().getSimpleName());
             if(copy != null) copies.add(copy);
         }
         int copySize = copies.size;
@@ -529,6 +531,9 @@ public class BoxSelect{
         for(LStatement st : copies){
             st.setupUI();
         }
+        // copy() 用 write→read 序列化，JumpStatement.dest（transient）为 null，
+        // setupUI() 是空方法不重建。手动从 destIndex 查找 StatementElem 赋值给 dest
+        resolveJumpDests(canvas);
 
         finalizeLayout(canvas);
         // 先恢复所有积木的按钮图标（旧选中积木的 Icon.move 改回 Icon.copy）
@@ -641,20 +646,15 @@ public class BoxSelect{
         resetAllTranslations(canvas);
 
         if(state == State.DRAGGING_MOVE){
-            // 移动模式：不 compact（与复制模式一致），保持 validate 后的原始布局。
-            // 选中积木用 translation 跟随鼠标，非选中积木保持原位，
-            // 腾位由 applyInsertShiftViaTranslation 处理。
+            // 移动模式：选中积木用 translation 跟随鼠标
             Vec2 localMouse = canvas.statements.stageToLocalCoordinates(Tmp.v2.set(mx, my));
             float dx = localMouse.x - dragStartLocalX;
             float dy = localMouse.y - dragStartLocalY;
-
-            // 选中积木跟随鼠标（translation）
             for(StatementElem elem : selected){
                 elem.setTranslation(dx, dy);
             }
         }
-        // 复制模式：原积木保持原位（validate 已正确布局），不设置 translation
-        // 预览跟随鼠标由 drawCopyPreview() 绘制半透明积木
+        // 复制模式：原积木保持原位，预览由 drawCopyPreview() 绘制
 
         // 计算插入位置（用原始 child.y，translation 已重置为0）
         int newInsertPos = computeInsertPosition(canvas, my);
@@ -662,17 +662,13 @@ public class BoxSelect{
             dragInsertPos = newInsertPos;
         }
 
-        // 注意：此处不再调用 applyInsertShiftViaTranslation 进行腾位。
-        // 历史上腾位用 translation 下移插入点下方的积木，但带来两个顽固 bug：
-        //   1. JumpCurve.act 用 localToAscendantCoordinates 定位（基于 child.y，不含 translation），
-        //      导致复制模式下跳转线与积木视觉位置错位、看似消失。
-        //   2. 移动模式下选中顶部积木时，腾位 + 松手 reset 的时机与 DragLayout.layout 的
-        //      height/invalidateHierarchy 交互产生顶部空白和整体下偏。
-        // 原版 DragLayout.layout 用 dragging 字段跳过拖动元素并直接改 y 腾位，
-        // 但我们的批量选中场景无法复用单积木 dragging 机制。放弃腾位，改由指示器标示插入位置，
-        // 松手时一次性 insert，位置最稳定。选中积木移动模式仍用 translation 跟随鼠标提供视觉反馈。
+        // 腾位：将插入点下方的非选中积木向下移，撑开空间显示插入位置。
+        // 关键：直接修改 child.y（而非 translation），因为 JumpCurve.act 内部用
+        // localToAscendantCoordinates 定位，基于 child.y 不含 translation。
+        // 用 translation 腾位会导致跳转线与积木视觉位置错位、看似消失。
+        applyInsertShift(canvas);
 
-        // 更新跳转线位置（原积木未动，位置正确）
+        // 腾位后更新跳转线位置——此时 child.y 已反映腾位，JumpCurve 能正确定位
         canvas.statements.jumps.act(0f);
         updateIndicatorGeometry(canvas);
 
@@ -716,10 +712,43 @@ public class BoxSelect{
         return nonSelectedCount;
     }
 
-    // ===== 手动布局（已废弃）=====
-    // 历史上这里曾有 relayoutNonSelected 和 applyInsertShiftViaTranslation 两个方法，
-    // 分别用于 compact 非选中积木和用 translation 腾位。两者都导致顽固 bug（顶部空白、
-    // 跳转线错位），已删除。详见 updateDrag 中的注释说明放弃腾位的原因。
+    // ===== 腾位 =====
+
+    /** 腾位：将插入点下方的非选中积木向下移，撑开空间显示插入位置。
+     *  直接修改 child.y（非 translation），因为 JumpCurve.act 用 localToAscendantCoordinates
+     *  定位时基于 child.y，不含 translation。每帧在 invalidate+validate（compact）后重新应用。
+     *  选中积木在移动模式下用 translation 跟随鼠标，其 child.y 保持 compact 位置。 */
+    private static void applyInsertShift(LCanvas canvas){
+        if(dragInsertPos < 0 || selected.isEmpty()) return;
+
+        Seq<Element> children = canvas.statements.getChildren();
+        float space = Scl.scl(10f);
+
+        // 腾位量 = 所有选中积木高度 + 间距（含首尾各一个 space 作为间隙）
+        float shiftAmount = 0;
+        for(StatementElem elem : selected){
+            shiftAmount += elem.getHeight() + space;
+        }
+        if(shiftAmount <= 0) return;
+
+        if(state == State.DRAGGING_COPY){
+            // 复制模式：dragInsertPos 是绝对索引，移该索引及以下的积木
+            for(int i = dragInsertPos; i < children.size; i++){
+                children.get(i).y -= shiftAmount;
+            }
+        }else{
+            // 移动模式：dragInsertPos 是非选中积木的相对索引，
+            // 需跳过选中积木找到对应绝对位置
+            int nonSelectedSeen = 0;
+            for(Element child : children){
+                if(child instanceof StatementElem && selected.contains(child)) continue;
+                if(nonSelectedSeen >= dragInsertPos){
+                    child.y -= shiftAmount;
+                }
+                nonSelectedSeen++;
+            }
+        }
+    }
 
     // ===== 指示器几何 =====
 
@@ -1085,7 +1114,7 @@ public class BoxSelect{
         for(StatementElem elem : sorted){
             elem.st.saveUI();
             LStatement copy = elem.st.copy();
-            Log.info("[LogicAssist] prepareCopyData: st=@ copy=@", elem.st.getClass().getSimpleName(), copy == null ? "null" : copy.getClass().getSimpleName());
+            Log.debug("[LogicAssist] prepareCopyData: st=@ copy=@", elem.st.getClass().getSimpleName(), copy == null ? "null" : copy.getClass().getSimpleName());
             if(copy != null) clipboardCopies.add(copy);
         }
         clipboardSize = clipboardCopies.size();
@@ -1112,7 +1141,7 @@ public class BoxSelect{
         Seq<LStatement> copies = new Seq<>();
         for(LStatement st : clipboardCopies){
             LStatement copy = st.copy();
-            Log.info("[LogicAssist] executeDragCopy: st=@ copy=@", st.getClass().getSimpleName(), copy == null ? "null" : copy.getClass().getSimpleName());
+            Log.debug("[LogicAssist] executeDragCopy: st=@ copy=@", st.getClass().getSimpleName(), copy == null ? "null" : copy.getClass().getSimpleName());
             copies.add(copy);
         }
         if(copies.isEmpty()){
@@ -1131,6 +1160,9 @@ public class BoxSelect{
         for(LStatement st : copies){
             st.setupUI();
         }
+        // copy() 用 write→read 序列化，JumpStatement.dest（transient）为 null，
+        // setupUI() 是空方法不重建。手动从 destIndex 查找 StatementElem 赋值给 dest
+        resolveJumpDests(canvas);
 
         finalizeLayout(canvas);
         reselectRange(canvas, actualInsert, copies.size);
@@ -1152,7 +1184,7 @@ public class BoxSelect{
         clipboardSelectedIndices = null;
         dragInsertPos = -1;
         state = State.SELECTED;
-        Log.info("[LogicAssist] Drag cancelled.");
+        Log.debug("[LogicAssist] Drag cancelled.");
     }
 
     /** Delete 键快速删除选中积木 */
@@ -1187,6 +1219,23 @@ public class BoxSelect{
             return Integer.compare(ia, ib);
         });
         return sorted;
+    }
+
+    /** 从 destIndex 重建 JumpStatement.dest 引用。
+     *  copy() 用 write→read 序列化，dest 是 transient 字段不会被复制，
+     *  setupUI() 是空方法不会自动重建。必须手动从 children 列表按 destIndex 查找。 */
+    private static void resolveJumpDests(LCanvas canvas){
+        Seq<Element> children = canvas.statements.getChildren();
+        for(Element child : children){
+            if(!(child instanceof StatementElem)) continue;
+            LStatement st = ((StatementElem)child).st;
+            if(st instanceof JumpStatement js && js.destIndex >= 0 && js.destIndex < children.size){
+                Element destChild = children.get(js.destIndex);
+                if(destChild instanceof StatementElem){
+                    js.dest = (StatementElem)destChild;
+                }
+            }
+        }
     }
 
     /** 调整副本中 JumpStatement 的 destIndex（executeDragCopy 和 duplicateSelectedBelow 共用） */

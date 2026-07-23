@@ -73,12 +73,17 @@ public class ExprStatement extends LStatement{
         table.add(" = ");
 
         // 表达式显示：Label（高亮 + 自动换行）与 TextField（编辑）切换
+        // Label 设置下划线背景（复用 TextField 的 underlineWhite），
+        // 保证非编辑态也有白色横杠，无需外层 wrapper Table
         Label exprLabel = new Label("");
+        Label.LabelStyle labelStyle = new Label.LabelStyle(exprLabel.getStyle());
+        if(Styles.nodeField.background != null){
+            labelStyle.background = Styles.nodeField.background;
+        }
+        exprLabel.setStyle(labelStyle);
         exprLabel.setWrap(true);
         exprLabel.setAlignment(Align.left);
         exprLabel.touchable = Touchable.enabled;
-        // 限制 Label 最大宽度，防止 Stack 被 prefWidth 撑大导致溢出
-        exprLabel.setLayoutEnabled(true);
 
         // 语法错误状态：错误时 Label 文字变红
         final boolean[] hasError = {false};
@@ -114,30 +119,17 @@ public class ExprStatement extends LStatement{
         updateLabel.run();
 
         // Stack 叠放 Label 和 TextField，占同一空间
-        // 覆盖 getPrefWidth() 返回 0，让外层 cell 不被 Stack 的 prefWidth 撑开，
-        // 实际宽度由 growX 填满 dest 右边剩余空间，自动适应窗口大小
+        // 覆盖 getPrefWidth() 返回 0，让外层 cell 不被 Stack 的 prefWidth 撑开
         arc.scene.ui.layout.Stack stack = new arc.scene.ui.layout.Stack(){
             @Override
             public float getPrefWidth(){ return 0; }
         };
         stack.add(exprLabel);
         stack.add(exprField);
-
-        // 用 Table 包裹 Stack 并设置下划线背景：
-        // TextField.visible=false 时不绘制自身背景，需要外层提供白色横杠，
-        // 保证非编辑态（Label）和编辑态（TextField）都有下划线
-        Table exprWrapper = new Table();
-        if(Styles.nodeField.background != null){
-            exprWrapper.setBackground(Styles.nodeField.background);
-        }
-        exprWrapper.add(stack).growX();
-        table.add(exprWrapper).growX().padLeft(4f).fillX();
+        table.add(stack).growX().padLeft(4f).fillX();
         exprField.visible = false;
 
-        // 点击 Label → 进入编辑模式。
-        // 用 InputListener.touchDown 而非 ClickListener.clicked：
-        // 进入编辑后 Label.visible=false，touchUp 事件丢失，ClickListener 的
-        // pressed 状态会卡住，导致无法再次点击进入编辑
+        // 点击 Label → 进入编辑模式
         exprLabel.addListener(new InputListener(){
             @Override
             public boolean touchDown(InputEvent event, float x, float y, int pointer, KeyCode button){
