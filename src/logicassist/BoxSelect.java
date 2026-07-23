@@ -112,8 +112,8 @@ public class BoxSelect{
     // 插入指示器几何位置
     private static float indicatorX, indicatorY, indicatorW, indicatorH;
 
-    // 复制用剪贴板
-    private static String clipboardData = null;
+    // 复制用剪贴板（用 copy() 保持 ExprStatement 折叠状态，不经过 write+read）
+    private static List<LStatement> clipboardCopies = null;
     private static int clipboardSize = 0;
     private static int[] clipboardSelectedIndices = null;
 
@@ -510,24 +510,21 @@ public class BoxSelect{
         int lastIdx = children.indexOf(sorted.get(sorted.size() - 1), true);
         int insertPos = lastIdx + 1;
 
-        StringBuilder sb = new StringBuilder();
         int[] selectedIndices = new int[sorted.size()];
+        Seq<LStatement> copies = new Seq<>();
         for(int i = 0; i < sorted.size(); i++){
             selectedIndices[i] = children.indexOf(sorted.get(i), true);
             sorted.get(i).st.saveUI();
-            sorted.get(i).st.write(sb);
-            sb.append("\n");
+            LStatement copy = sorted.get(i).st.copy();
+            if(copy != null) copies.add(copy);
         }
-        String data = sb.toString();
-        int copySize = sorted.size();
+        int copySize = copies.size;
 
         if(children.size + copySize > LExecutor.maxInstructions){
             Log.debug("[LogicAssist] Duplicate aborted: would exceed maxInstructions");
             return;
         }
 
-        boolean privileged = isPrivileged(canvas);
-        Seq<LStatement> copies = LAssembler.read(data, privileged);
         if(copies.isEmpty()) return;
 
         adjustJumpDestIndices(copies, selectedIndices, insertPos, copySize);
@@ -608,7 +605,7 @@ public class BoxSelect{
         state = State.IDLE;
         dragInsertPos = -1;
         dragMoved = false;
-        clipboardData = null;
+        clipboardCopies = null;
         clipboardSize = 0;
         clipboardSelectedIndices = null;
     }
@@ -1138,14 +1135,14 @@ public class BoxSelect{
             clipboardSelectedIndices[i] = children.indexOf(sorted.get(i), true);
         }
 
-        StringBuilder sb = new StringBuilder();
+        // 用 copy() 保持 ExprStatement 折叠状态（write+read 会展开表达式为 op 链）
+        clipboardCopies = new ArrayList<>();
         for(StatementElem elem : sorted){
             elem.st.saveUI();
-            elem.st.write(sb);
-            sb.append("\n");
+            LStatement copy = elem.st.copy();
+            if(copy != null) clipboardCopies.add(copy);
         }
-        clipboardData = sb.toString();
-        clipboardSize = sorted.size();
+        clipboardSize = clipboardCopies.size();
     }
 
     private static void executeDragCopy(LCanvas canvas, int insertPos){
@@ -1153,7 +1150,7 @@ public class BoxSelect{
 
         resetAllTranslations(canvas);
 
-        if(clipboardData == null || clipboardData.isEmpty()){
+        if(clipboardCopies == null || clipboardCopies.isEmpty()){
             enterSelectedState(canvas);
             return;
         }
@@ -1165,8 +1162,11 @@ public class BoxSelect{
             return;
         }
 
-        boolean privileged = isPrivileged(canvas);
-        Seq<LStatement> copies = LAssembler.read(clipboardData, privileged);
+        // 从 clipboardCopies 创建新副本（每次复制都需要独立对象）
+        Seq<LStatement> copies = new Seq<>();
+        for(LStatement st : clipboardCopies){
+            copies.add(st.copy());
+        }
         if(copies.isEmpty()){
             enterSelectedState(canvas);
             return;
@@ -1174,7 +1174,7 @@ public class BoxSelect{
 
         int actualInsert = Math.max(0, Math.min(insertPos, canvas.statements.getChildren().size));
 
-        adjustJumpDestIndices(copies, clipboardSelectedIndices, actualInsert, clipboardSize);
+        adjustJumpDestIndices(copies, clipboardSelectedIndices, actualInsert, copies.size);
 
         // 先全部插入，再统一 setupUI（避免 jump.setupUI() 找不到未插入的副本）
         for(int i = 0; i < copies.size; i++){
@@ -1187,7 +1187,7 @@ public class BoxSelect{
         finalizeLayout(canvas);
         reselectRange(canvas, actualInsert, copies.size);
 
-        clipboardData = null;
+        clipboardCopies = null;
         clipboardSize = 0;
         clipboardSelectedIndices = null;
 
@@ -1199,7 +1199,7 @@ public class BoxSelect{
         clearDraggingField(canvas);
 
         resetAllTranslations(canvas);
-        clipboardData = null;
+        clipboardCopies = null;
         clipboardSize = 0;
         clipboardSelectedIndices = null;
         dragInsertPos = -1;
