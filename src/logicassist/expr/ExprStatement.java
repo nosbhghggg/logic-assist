@@ -111,7 +111,7 @@ public class ExprStatement extends LStatement{
         // 积木总宽 Scl.scl(targetWidth)，减去 dest 字段和 " = " 占用约 130f
         float exprMaxWidth = Scl.scl(LCanvas.useRows() ? 400f : 900f) - Scl.scl(130f);
 
-        // 点击 Label → 进入编辑模式
+        // 点击 Label → 进入编辑模式（TextField 不支持富文本，编辑时无高亮）
         exprLabel.addListener(new ClickListener(){
             @Override
             public void clicked(InputEvent event, float x, float y){
@@ -132,9 +132,13 @@ public class ExprStatement extends LStatement{
             }
         });
 
-        // Label 用固定宽度 cell 约束，让 setWrap 自动换行
-        table.add(exprLabel).width(exprMaxWidth).padLeft(4f).fill(false).expand(false, false);
-        table.add(exprField).growX().padLeft(4f);
+        // 用 Stack 叠放 Label 和 TextField，占同一空间避免偏移
+        // Stack 的 layout 会让子元素填满自身，Label 在 Stack 宽度内 wrap
+        arc.scene.ui.layout.Stack stack = new arc.scene.ui.layout.Stack();
+        stack.add(exprLabel);
+        stack.add(exprField);
+        // 固定宽度约束：让 Stack 不随 TextField 内容撑开，Label wrap 在此宽度内生效
+        table.add(stack).width(exprMaxWidth).padLeft(4f);
         exprField.visible = false;
     }
 
