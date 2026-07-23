@@ -651,10 +651,9 @@ public class BoxSelect{
         resetAllTranslations(canvas);
 
         if(state == State.DRAGGING_MOVE){
-            // 移动模式：跳过选中积木布局（它们用 translation 跟随鼠标，不占原位）
-            relayoutNonSelected(canvas);
-
-            // 用 DragLayout 本地坐标系计算 dx/dy
+            // 移动模式：不 compact（与复制模式一致），保持 validate 后的原始布局。
+            // 选中积木用 translation 跟随鼠标，非选中积木保持原位，
+            // 腾位由 applyInsertShiftViaTranslation 处理。
             Vec2 localMouse = canvas.statements.stageToLocalCoordinates(Tmp.v2.set(mx, my));
             float dx = localMouse.x - dragStartLocalX;
             float dy = localMouse.y - dragStartLocalY;
@@ -728,18 +727,18 @@ public class BoxSelect{
     // 手动布局（跳过选中积木 + 腾位）
     // ==================================================================
 
-    /** 跳过选中积木布局，非选中积木紧凑排列（不为选中积木预留空间）。
-     *  腾位由 applyInsertShiftViaTranslation 负责，避免双重下移。 */
+    /** 跳过选中积木布局，非选中积木紧凑排列。
+     *  关键：totalHeight 用所有积木高度（含选中），与原版 DragLayout.layout() 一致，
+     *  这样 compact 后非选中积木的位置会预留选中积木的空间，
+     *  腾位时再下移 shiftAmount，净效果为选中积木的位置空出来。 */
     private static void relayoutNonSelected(LCanvas canvas){
         Seq<Element> children = canvas.statements.getChildren();
         float space = Scl.scl(10f);
         float width = canvas.statements.getWidth();
 
-        // totalHeight 只算非选中积木：选中积木用 translation 跟随鼠标，
-        // 插入位置的腾位由 applyInsertShiftViaTranslation 处理。
+        // totalHeight 含所有积木（包括选中），与原版 DragLayout.layout() 的 sumf 一致
         float totalHeight = 0;
         for(Element e : children){
-            if(e instanceof StatementElem && selected.contains(e)) continue;
             totalHeight += e.getPrefHeight() + space;
         }
         totalHeight = Math.max(0, totalHeight - space);
@@ -754,9 +753,12 @@ public class BoxSelect{
     }
 
     /** 用 translation 腾位（不修改 child.y，避免 layout() 重置导致闪烁）。
-     *  translation 在 Element.draw() 中应用，layout() 不会重置它。 */
+     *  translation 在 Element.draw() 中应用，layout() 不会重置它。
+     *  - 移动模式：dragInsertPos 是非选中索引，跳过选中积木
+     *  - 复制模式：dragInsertPos 是全量索引，不跳过任何积木（含选中积木也要让开） */
     private static void applyInsertShiftViaTranslation(LCanvas canvas){
         if(dragInsertPos < 0) return;
+
         Seq<Element> children = canvas.statements.getChildren();
         float space = Scl.scl(10f);
 
@@ -767,18 +769,15 @@ public class BoxSelect{
         shiftAmount -= space;
 
         if(state == State.DRAGGING_COPY){
-            // 复制模式：跳过选中积木，只移动非选中积木
-            // （选中积木用 translation 跟随鼠标，不应被腾位影响）
-            int nonSelectedIndex = 0;
-            for(Element child : children){
-                if(child instanceof StatementElem && selected.contains(child)) continue;
-                if(nonSelectedIndex >= dragInsertPos){
+            // 复制模式：dragInsertPos 是全量 child 索引，所有积木（含选中）参与腾位
+            for(int i = 0; i < children.size; i++){
+                if(i >= dragInsertPos){
+                    Element child = children.get(i);
                     child.setTranslation(child.translation.x, child.translation.y - shiftAmount);
                 }
-                nonSelectedIndex++;
             }
         }else{
-            // 移动模式：dragInsertPos 是非选中索引，只移动非选中积木
+            // 移动模式：dragInsertPos 是非选中索引，跳过选中积木
             int nonSelectedIndex = 0;
             for(Element child : children){
                 if(child instanceof StatementElem && selected.contains(child)) continue;
@@ -1124,10 +1123,13 @@ public class BoxSelect{
             canvas.statements.addChildAt(actualInsert + i, sorted.get(i));
         }
 
-        canvas.statements.updateJumpHeights = true;
-        canvas.statements.invalidate();
-        canvas.statements.validate();
+        // 双重 invalidate + validate 处理高度变化，jumps.act 同步跳转线位置
+        // saveAllJumpUI 通过 dest.parent.getChildren().indexOf(dest) 反查更新 destIndex，
+        // 覆盖 jump 自身被移动 / dest 被移动 / 两者都被移动 / 都未被移动 所有情况
+        finalizeLayout(canvas);
         saveAllJumpUI(canvas);
+        // saveAllJumpUI 改变了 destIndex，需再次 act 让 JumpCurve 重新连接目标
+        canvas.statements.jumps.act(0f);
         reselectRange(canvas, actualInsert, count);
         enterSelectedState(canvas);
         Log.debug("[LogicAssist] Drag-moved " + count + " blocks to position " + actualInsert);
