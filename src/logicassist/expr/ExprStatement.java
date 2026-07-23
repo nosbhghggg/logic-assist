@@ -2,6 +2,7 @@ package logicassist.expr;
 
 import arc.*;
 import arc.graphics.*;
+import arc.math.*;
 import arc.scene.*;
 import arc.scene.event.*;
 import arc.scene.ui.*;
@@ -76,6 +77,9 @@ public class ExprStatement extends LStatement{
         exprLabel.setAlignment(Align.left);
         exprLabel.touchable = Touchable.enabled;
 
+        // 语法错误状态：错误时 Label 文字变红
+        final boolean[] hasError = {false};
+
         TextField exprField = new TextField(expr);
         exprField.setStyle(Styles.nodeField);
         exprField.setMessageText("expr");
@@ -86,14 +90,26 @@ public class ExprStatement extends LStatement{
             expr = exprField.getText();
             try{
                 lastOps = ExprCompiler.compile(dest, expr);
-            }catch(Exception ignored){
-                // 输入中的语法错误，保留旧 lastOps
+                hasError[0] = false;
+            }catch(Exception e){
+                // 输入中的语法错误，保留旧 lastOps，标记错误状态
+                hasError[0] = true;
             }
         });
 
-        // 更新 Label 的高亮文本
-        Runnable updateLabel = () -> exprLabel.setText(highlightExpr(expr));
+        // 更新 Label 的高亮文本（错误时用红色）
+        Runnable updateLabel = () -> {
+            if(hasError[0]){
+                exprLabel.setColor(Color.scarlet);
+            }else{
+                exprLabel.setColor(Color.white);
+            }
+            exprLabel.setText(highlightExpr(expr));
+        };
         updateLabel.run();
+
+        // 积木总宽 Scl.scl(targetWidth)，减去 dest 字段和 " = " 占用约 130f
+        float exprMaxWidth = Scl.scl(LCanvas.useRows() ? 400f : 900f) - Scl.scl(130f);
 
         // 点击 Label → 进入编辑模式
         exprLabel.addListener(new ClickListener(){
@@ -107,7 +123,7 @@ public class ExprStatement extends LStatement{
             }
         });
 
-        // TextField 失焦 → 切回 Label 显示
+        // TextField 失焦 → 切回 Label 显示（重新高亮 + 错误状态）
         exprField.update(() -> {
             if(exprField.visible && Core.scene.getKeyboardFocus() != exprField){
                 exprField.visible = false;
@@ -116,11 +132,9 @@ public class ExprStatement extends LStatement{
             }
         });
 
-        // 用 Stack 叠放 Label 和 TextField，通过 visible 切换，避免并排占两份空间
-        arc.scene.ui.layout.Stack stack = new arc.scene.ui.layout.Stack();
-        stack.add(exprLabel);
-        stack.add(exprField);
-        table.add(stack).growX().padLeft(4f);
+        // Label 用固定宽度 cell 约束，让 setWrap 自动换行
+        table.add(exprLabel).width(exprMaxWidth).padLeft(4f).fill(false).expand(false, false);
+        table.add(exprField).growX().padLeft(4f);
         exprField.visible = false;
     }
 
