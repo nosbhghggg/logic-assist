@@ -17,7 +17,9 @@ import java.lang.reflect.*;
  * 核心改进：
  * - load() 完成后立即折叠 op 链为零延迟
  * - save() 保存前先展开，保存后重新折叠
- * - draw() 在原版绘制完成后重新设置 addressLabel
+ * - act() 中先 validate() 强制 layout() 提前执行（updateAddress 设置原版行号），
+ *   然后立即 updateAddressLabels 覆盖为 mlog 行号。
+ *   这样 draw() 时 needsLayout=false，layout() 不再执行，label 用我们的文本绘制。
  */
 public class LogicCanvas extends LCanvas{
 
@@ -43,8 +45,19 @@ public class LogicCanvas extends LCanvas{
     }
 
     @Override
+    public void act(float delta){
+        super.act(delta);
+        // 关键：在 act 阶段强制 validate，让 layout() → updateAddress() 提前执行
+        // 然后立即覆盖为 mlog 行号。
+        // 这样 draw() 时 needsLayout=false，layout() 不再覆盖我们的标签。
+        statements.validate();
+        ExprHook.updateAddressLabels(this);
+    }
+
+    @Override
     public void draw(){
         super.draw();
+        // 保险：draw 后再设置一次（万一 act 和 draw 之间有 invalidate）
         ExprHook.updateAddressLabels(this);
         JumpLineColor.patchAllCurves(this);
     }
