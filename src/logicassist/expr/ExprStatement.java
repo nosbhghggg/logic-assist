@@ -2,6 +2,7 @@ package logicassist.expr;
 
 import arc.scene.ui.*;
 import arc.scene.ui.layout.*;
+import arc.util.*;
 import mindustry.logic.*;
 import mindustry.logic.LExecutor.*;
 import mindustry.logic.LStatements.*;
@@ -76,6 +77,7 @@ public class ExprStatement extends LStatement{
 
     @Override
     public LStatement copy(){
+        Log.info("[LogicAssist] ExprStatement.copy() called: dest=@ expr=@", dest, expr);
         ExprStatement copy = new ExprStatement();
         copy.dest = this.dest;
         copy.expr = this.expr;

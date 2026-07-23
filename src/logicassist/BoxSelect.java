@@ -516,6 +516,7 @@ public class BoxSelect{
             selectedIndices[i] = children.indexOf(sorted.get(i), true);
             sorted.get(i).st.saveUI();
             LStatement copy = sorted.get(i).st.copy();
+            Log.info("[LogicAssist] duplicateSelectedBelow: st=@ copy=@", sorted.get(i).st.getClass().getSimpleName(), copy == null ? "null" : copy.getClass().getSimpleName());
             if(copy != null) copies.add(copy);
         }
         int copySize = copies.size;
@@ -1140,6 +1141,7 @@ public class BoxSelect{
         for(StatementElem elem : sorted){
             elem.st.saveUI();
             LStatement copy = elem.st.copy();
+            Log.info("[LogicAssist] prepareCopyData: st=@ copy=@", elem.st.getClass().getSimpleName(), copy == null ? "null" : copy.getClass().getSimpleName());
             if(copy != null) clipboardCopies.add(copy);
         }
         clipboardSize = clipboardCopies.size();
@@ -1165,7 +1167,9 @@ public class BoxSelect{
         // 从 clipboardCopies 创建新副本（每次复制都需要独立对象）
         Seq<LStatement> copies = new Seq<>();
         for(LStatement st : clipboardCopies){
-            copies.add(st.copy());
+            LStatement copy = st.copy();
+            Log.info("[LogicAssist] executeDragCopy: st=@ copy=@", st.getClass().getSimpleName(), copy == null ? "null" : copy.getClass().getSimpleName());
+            copies.add(copy);
         }
         if(copies.isEmpty()){
             enterSelectedState(canvas);
