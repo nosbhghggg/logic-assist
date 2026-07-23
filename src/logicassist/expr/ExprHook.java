@@ -80,6 +80,13 @@ public class ExprHook{
 
             int chainLen = j - i;
             if(chainLen >= 2){
+                // 安全检查：若有 jump 指向链中间 [i+1, i+chainLen-1]，放弃折叠。
+                // 场景：别人没装插件时写的 jump 指向 op 链中间，折叠会改变语义。
+                // 指向链首 i 是允许的，折叠后仍指向 expr 积木。
+                if(hasJumpInRange(canvas, i + 1, i + chainLen - 1)){
+                    i = j; // 跳过整条链，不折叠
+                    continue;
+                }
                 String expr = ExprCompiler.rebuild(ops);
                 if(expr != null){
                     String dest = ops.get(ops.size() - 1).dest;
@@ -95,10 +102,7 @@ public class ExprHook{
 
                     canvas.addAt(i, exprStmt);
 
-                    // 关键修复：先钳制再调整
-                    // 1. 先钳制：destIndex 指向 op 链内部 [i, i+chainLen-1] 的改为 i
-                    clampJumpIndices(canvas, i, i + chainLen - 1, i);
-                    // 2. 后调整：destIndex 在链后面的 ( > i+chainLen-1 ) 减 (chainLen-1)
+                    // 链后面的 jump destIndex 减 (chainLen-1)
                     adjustJumpIndices(canvas, i + chainLen - 1, -(chainLen - 1));
 
                     changed = true;
@@ -189,7 +193,9 @@ public class ExprHook{
         }
     }
 
-    private static void clampJumpIndices(LCanvas canvas, int lo, int hi, int value){
+    /** 检查是否有 JumpStatement 的 destIndex 落在 [lo, hi] 范围内 */
+    private static boolean hasJumpInRange(LCanvas canvas, int lo, int hi){
+        if(lo > hi) return false;
         Seq<Element> children = canvas.statements.getChildren();
         for(Element child : children){
             if(!(child instanceof StatementElem)) continue;
@@ -197,10 +203,11 @@ public class ExprHook{
             if(elem.st instanceof JumpStatement){
                 JumpStatement jump = (JumpStatement)elem.st;
                 if(jump.destIndex >= lo && jump.destIndex <= hi){
-                    jump.destIndex = value;
+                    return true;
                 }
             }
         }
+        return false;
     }
 
     // ===== 工具方法 =====
