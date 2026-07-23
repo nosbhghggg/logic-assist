@@ -100,6 +100,7 @@ public class ExprStatement extends LStatement{
         });
 
         // 更新 Label 的高亮文本（错误时用红色）
+        // pack() 强制 Label 在固定宽度下重新 layout，计算 wrap 后的真实高度
         Runnable updateLabel = () -> {
             if(hasError[0]){
                 exprLabel.setColor(Color.scarlet);
@@ -107,6 +108,7 @@ public class ExprStatement extends LStatement{
                 exprLabel.setColor(Color.white);
             }
             exprLabel.setText(highlightExpr(expr));
+            exprLabel.pack();
         };
         updateLabel.run();
 
