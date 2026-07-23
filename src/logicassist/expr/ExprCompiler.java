@@ -15,6 +15,20 @@ import java.util.*;
  * 临时变量策略：使用 _ 作为主临时变量，通过栈式分配复用。
  * 当两个子表达式都复杂时，使用 _1, _2 等编号临时变量。
  * 每个临时变量写入一次、读取一次，形成线性链，以支持逆向重建。
+ *
+ * ------------------------------------------------------------
+ * 致谢 / Acknowledgements
+ * ------------------------------------------------------------
+ * 反编译（op 链 → 表达式）思路参考了 mindcode 项目的 MlogDecompiler：
+ *   - 项目地址: https://github.com/PizzaNX/mindcode
+ *   - 参考文件: compiler/src/main/java/info/teksol/mc/mindcode/decompiler/MlogDecompiler.java
+ *   - 参考内容: collapseExpressions() 用变量定义表跟踪临时变量，
+ *     将后续引用替换为 OperationExpression 子树；与本项目 rebuild()
+ *     + substituteTemp() 的递归替换思路一致。
+ * 运算符分类（一元/函数型二元/符号二元）参考了 mindcode 的 Operation 枚举：
+ *   - 参考文件: compiler/src/main/java/info/teksol/mc/mindcode/logic/arguments/Operation.java
+ * 表达式优化规则（add x a 0 → a、mul x a 1 → a）参考了 mindcode 文档：
+ *   - 参考文件: doc/syntax/optimizations/EXPRESSION-OPTIMIZATION.markdown
  */
 public class ExprCompiler{
 
