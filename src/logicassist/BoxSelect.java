@@ -108,37 +108,43 @@ public class BoxSelect{
     // ==================================================================
 
     public static void init(){
-        Core.app.post(() -> tick());
-    }
-
-    private static void tick(){
-        Core.app.post(BoxSelect::tick);
-
-        try{
+        Core.app.post(() -> {
             LCanvas canvas = getCanvas();
-            if(canvas == null) return;
-
-            if(!initialized){
-                setup(canvas);
-                initialized = true;
-                Log.info("[LogicAssist] BoxSelect initialized (capture listener mode).");
+            if(canvas == null){
+                // canvas 还没准备好，下一帧重试
+                Core.app.post(() -> init());
+                return;
             }
+            setup(canvas);
+            initialized = true;
+            Log.info("[LogicAssist] BoxSelect initialized (event-driven mode).");
 
+            // 对话框关闭时重置状态（替代原 tick 轮询检测）
             LogicDialog dialog = Vars.ui.logic;
-            if(dialog != null && !dialog.isShown() && state != State.IDLE){
-                resetState(canvas);
+            if(dialog != null){
+                dialog.hidden(() -> {
+                    if(state != State.IDLE){
+                        resetState(canvas);
+                    }
+                });
             }
+        });
 
-            // Delete 键快速删除选中积木
-            if(dialog != null && dialog.isShown() && state == State.SELECTED && !selected.isEmpty()){
-                if(Core.input.keyTap(KeyCode.del) || Core.input.keyTap(KeyCode.backspace)){
+        // Delete/Backspace 键：事件驱动，不再轮询
+        Core.scene.addListener(new InputListener(){
+            @Override
+            public boolean keyDown(InputEvent event, KeyCode key){
+                if(key != KeyCode.del && key != KeyCode.backspace) return false;
+                LogicDialog dialog = Vars.ui.logic;
+                if(dialog == null || !dialog.isShown()) return false;
+                if(state != State.SELECTED || selected.isEmpty()) return false;
+                LCanvas canvas = getCanvas();
+                if(canvas != null){
                     deleteSelected(canvas);
                 }
+                return false;
             }
-
-        }catch(Exception e){
-            Log.info("[LogicAssist] BoxSelect tick error: " + e);
-        }
+        });
     }
 
     /** 注册 capture listener 和 overlay。
