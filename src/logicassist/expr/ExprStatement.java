@@ -111,35 +111,39 @@ public class ExprStatement extends LStatement{
         // 积木总宽 Scl.scl(targetWidth)，减去 dest 字段和 " = " 占用约 130f
         float exprMaxWidth = Scl.scl(LCanvas.useRows() ? 400f : 900f) - Scl.scl(130f);
 
-        // 点击 Label → 进入编辑模式（TextField 不支持富文本，编辑时无高亮）
+        // Label cell 和 Field cell：显示态 Label 占满、Field 收缩；编辑态反之
+        Cell<Label> labelCell = table.add(exprLabel).width(exprMaxWidth).padLeft(4f).fill(false).expand(false, false);
+        Cell<TextField> fieldCell = table.add(exprField).padLeft(4f);
+        fieldCell.width(0f); // 初始收缩 Field
+        final boolean[] editing = {false};
+
+        // 点击 Label → 进入编辑模式
         exprLabel.addListener(new ClickListener(){
             @Override
             public void clicked(InputEvent event, float x, float y){
                 exprField.setText(expr);
-                exprLabel.visible = false;
-                exprField.visible = true;
+                labelCell.width(0f);
+                fieldCell.width(exprMaxWidth);
+                table.invalidate();
                 Core.scene.setKeyboardFocus(exprField);
                 Core.scene.setScrollFocus(exprField);
+                editing[0] = true;
             }
         });
 
-        // TextField 失焦 → 切回 Label 显示（重新高亮 + 错误状态）
+        // 失焦检测：用 update 轮询焦点，切回 Label 显示
+        final boolean[] wasFocused = {false};
         exprField.update(() -> {
-            if(exprField.visible && Core.scene.getKeyboardFocus() != exprField){
-                exprField.visible = false;
-                exprLabel.visible = true;
+            boolean focused = Core.scene.getKeyboardFocus() == exprField;
+            if(wasFocused[0] && !focused && editing[0]){
+                labelCell.width(exprMaxWidth);
+                fieldCell.width(0f);
+                table.invalidate();
                 updateLabel.run();
+                editing[0] = false;
             }
+            wasFocused[0] = focused;
         });
-
-        // 用 Stack 叠放 Label 和 TextField，占同一空间避免偏移
-        // Stack 的 layout 会让子元素填满自身，Label 在 Stack 宽度内 wrap
-        arc.scene.ui.layout.Stack stack = new arc.scene.ui.layout.Stack();
-        stack.add(exprLabel);
-        stack.add(exprField);
-        // 固定宽度约束：让 Stack 不随 TextField 内容撑开，Label wrap 在此宽度内生效
-        table.add(stack).width(exprMaxWidth).padLeft(4f);
-        exprField.visible = false;
     }
 
     /** 把表达式转为带颜色标记的富文本，用于 Label 高亮显示。
