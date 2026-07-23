@@ -2,19 +2,14 @@ package logicassist.expr;
 
 import arc.*;
 import arc.func.*;
-import arc.graphics.g2d.*;
-import arc.math.*;
-import arc.math.geom.*;
 import arc.scene.*;
-import arc.scene.ui.*;
 import arc.struct.*;
 import arc.util.*;
-import mindustry.*;
+import mindustry.gen.*;
 import mindustry.logic.*;
 import mindustry.logic.LCanvas.*;
 import mindustry.logic.LStatements.*;
 
-import java.lang.reflect.*;
 import java.util.*;
 
 /**
@@ -23,39 +18,27 @@ import java.util.*;
  * 夺舍架构后：
  * - foldAll() 由 LogicCanvas.load() 直接调用，零延迟
  * - save() 由 LogicCanvas.save() 调用：unfoldAll → super.save → foldAll
+ * - 行号由 LogicDragLayout.layout() 自动设置，不再需要反射覆盖 addressLabel
+ * - LogicIO.allStatements 是 public static 字段，直接访问无需反射
  * - updateJumpHeights 是 DragLayout 的 public 字段，直接访问
  */
 public class ExprHook{
 
     private static boolean statementRegistered = false;
 
-    // 反射缓存：StatementElem.addressLabel
-    private static Field addressLabelField;
-    private static boolean addressLabelFieldChecked = false;
-
     public static void init(){
         registerStatement();
     }
 
     /** 将 ExprStatement 注入 LogicIO.allStatements，使其出现在编辑器的积木列表中。 */
-    @SuppressWarnings("unchecked")
     private static void registerStatement(){
         if(statementRegistered) return;
-        try{
-            Class<?> logicIO = Class.forName("mindustry.gen.LogicIO");
-            Field allStatementsField = logicIO.getField("allStatements");
-            Seq<Prov<LStatement>> allStatements = (Seq<Prov<LStatement>>)allStatementsField.get(null);
-
-            for(Prov<LStatement> prov : allStatements){
-                if(prov.get() instanceof ExprStatement) return;
-            }
-
-            allStatements.add(() -> new ExprStatement());
-            statementRegistered = true;
-            Log.info("[LogicAssist] ExprStatement registered to LogicIO.allStatements");
-        }catch(Exception e){
-            Log.err("[LogicAssist] Failed to register ExprStatement", e);
+        for(Prov<LStatement> prov : LogicIO.allStatements){
+            if(prov.get() instanceof ExprStatement) return;
         }
+        LogicIO.allStatements.add(() -> new ExprStatement());
+        statementRegistered = true;
+        Log.info("[LogicAssist] ExprStatement registered to LogicIO.allStatements");
     }
 
     // ===== 折叠：op 链 → ExprStatement =====
@@ -126,7 +109,7 @@ public class ExprHook{
 
         if(changed){
             setupUIAll(canvas);
-            updateAddressLabels(canvas);
+            // 行号由 LogicDragLayout.layout() 自动更新，无需手动调用
             canvas.statements.updateJumpHeights = true;
             Log.debug("[LogicAssist] Expression chains folded");
         }
@@ -216,120 +199,6 @@ public class ExprHook{
                 if(jump.destIndex >= lo && jump.destIndex <= hi){
                     jump.destIndex = value;
                 }
-            }
-        }
-    }
-
-    // ===== 行号显示：更新所有积木的 addressLabel 为 mlog 行号 =====
-
-    /** 折叠后更新所有积木的地址标签，显示展开后的真实 mlog 行号。
-     *  - ExprStatement 显示行号区间（如 "0→2"）
-     *  - 其他积木显示单行号
-     *  - 后面积木的行号自动跳过 Expr 展开的行数
-     */
-    public static void updateAddressLabels(LCanvas canvas){
-        if(canvas == null || canvas.statements == null) return;
-        Seq<Element> children = canvas.statements.getChildren();
-
-        int mlogLine = 0;
-        for(Element child : children){
-            if(!(child instanceof StatementElem)) continue;
-            StatementElem elem = (StatementElem)child;
-
-            if(elem.st instanceof ExprStatement){
-                ExprStatement exprStmt = (ExprStatement)elem.st;
-                // 确保 lastOps 已编译（从文本加载或手动添加的 Expr 可能还没编译）
-                if(exprStmt.lastOps == null){
-                    try{
-                        exprStmt.lastOps = ExprCompiler.compile(exprStmt.dest, exprStmt.expr);
-                    }catch(Exception e){
-                        // 编译失败，按单行处理
-                    }
-                }
-                int lineCount = (exprStmt.lastOps != null) ? exprStmt.lastOps.size() : 1;
-                int endLine = mlogLine + lineCount - 1;
-                // 多行显示区间，单行显示数字
-                setAddressLabel(elem, lineCount > 1 ? (mlogLine + "-" + endLine) : (mlogLine + ""));
-                mlogLine += lineCount;
-            }else{
-                setAddressLabel(elem, mlogLine + "");
-                mlogLine++;
-            }
-        }
-    }
-
-    /** 通过反射设置 StatementElem.addressLabel 的文本 */
-    private static void setAddressLabel(StatementElem elem, String text){
-        try{
-            if(!addressLabelFieldChecked){
-                addressLabelFieldChecked = true;
-                addressLabelField = StatementElem.class.getDeclaredField("addressLabel");
-                addressLabelField.setAccessible(true);
-            }
-            if(addressLabelField != null){
-                Label label = (Label)addressLabelField.get(elem);
-                if(label != null){
-                    label.setText(text);
-                }
-            }
-        }catch(Exception e){
-            // 反射失败，保持原版显示
-        }
-    }
-
-    /** super.draw() 后重画 addressLabel，覆盖原版行号。
-     *  label 的坐标系：DragLayout 原点 → StatementElem 位置 → label 位置。
-     *  需要正确设置 Draw.transform 到 StatementElem 的世界坐标。 */
-    public static void redrawAddressLabels(LCanvas canvas){
-        if(canvas == null || canvas.statements == null) return;
-        Seq<Element> children = canvas.statements.getChildren();
-
-        int mlogLine = 0;
-        for(Element child : children){
-            if(!(child instanceof StatementElem)) continue;
-            StatementElem elem = (StatementElem)child;
-
-            String text;
-            if(elem.st instanceof ExprStatement){
-                ExprStatement exprStmt = (ExprStatement)elem.st;
-                if(exprStmt.lastOps == null){
-                    try{
-                        exprStmt.lastOps = ExprCompiler.compile(exprStmt.dest, exprStmt.expr);
-                    }catch(Exception e){
-                        // 编译失败，按单行处理
-                    }
-                }
-                int lineCount = (exprStmt.lastOps != null) ? exprStmt.lastOps.size() : 1;
-                int endLine = mlogLine + lineCount - 1;
-                text = lineCount > 1 ? (mlogLine + "-" + endLine) : (mlogLine + "");
-                mlogLine += lineCount;
-            }else{
-                text = mlogLine + "";
-                mlogLine++;
-            }
-
-            // 跳过文本相同的（原版 updateAddress 已设好的单行号）
-            try{
-                if(!addressLabelFieldChecked){
-                    addressLabelFieldChecked = true;
-                    addressLabelField = StatementElem.class.getDeclaredField("addressLabel");
-                    addressLabelField.setAccessible(true);
-                }
-                if(addressLabelField != null){
-                    Label label = (Label)addressLabelField.get(elem);
-                    if(label != null && !text.equals(label.getText().toString())){
-                        label.setText(text);
-                        label.layout();
-                        // 重画 label：设置 transform 到 StatementElem 的世界坐标
-                        Vec2 elemOrigin = elem.localToStageCoordinates(Tmp.v1.set(0, 0));
-                        Mat oldMat = Draw.trans();
-                        Draw.trans(new Mat().setToTranslation(elemOrigin.x, elemOrigin.y));
-                        label.draw();
-                        Draw.trans(oldMat);
-                    }
-                }
-            }catch(Exception e){
-                // ignore
             }
         }
     }

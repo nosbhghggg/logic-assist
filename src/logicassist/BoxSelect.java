@@ -58,6 +58,13 @@ public class BoxSelect{
 
     // ===== 常量 =====
     private static final float MIN_DRAG_DIST = 8f;
+    private static final float SCROLLBAR_WIDTH = 14f;
+    private static final float AUTOSCROLL_MARGIN = 80f;
+    private static final float AUTOSCROLL_SPEED = 15f;
+    private static final float FILL_ALPHA = 0.15f;
+    private static final float BORDER_ALPHA = 0.8f;
+    private static final float COPY_PREVIEW_ALPHA = 0.5f;
+    private static final float SCROLLBAR_SEG_ALPHA = 0.35f;
     private static final Mat tmpMat = new Mat();
     private static final Mat tmpMat2 = new Mat();
 
@@ -269,7 +276,7 @@ public class BoxSelect{
             float paneX = canvas.pane.x;
             float paneW = canvas.pane.getWidth();
             // 滚动条区域：右侧 14px
-            if(stageCoords.x > paneX + paneW - 14f){
+            if(stageCoords.x > paneX + paneW - SCROLLBAR_WIDTH){
                 return false;
             }
         }
@@ -829,8 +836,8 @@ public class BoxSelect{
         if(canvas.pane == null) return;
         float mouseY = Core.input.mouseY();
         float screenH = Core.graphics.getHeight();
-        float margin = Scl.scl(80f);
-        float speed = Scl.scl(15f) * Time.delta;
+        float margin = Scl.scl(AUTOSCROLL_MARGIN);
+        float speed = Scl.scl(AUTOSCROLL_SPEED) * Time.delta;
 
         if(mouseY < margin){
             canvas.pane.setScrollY(canvas.pane.getScrollY() + speed);
@@ -896,11 +903,11 @@ public class BoxSelect{
 
         Color modeColor = getModeColor();
         Draw.color(modeColor);
-        Draw.alpha(0.15f);
+        Draw.alpha(FILL_ALPHA);
         Fill.crect(sx, sy, w, h);
 
         Draw.color(modeColor);
-        Draw.alpha(0.8f);
+        Draw.alpha(BORDER_ALPHA);
         Lines.stroke(Scl.scl(1.5f), modeColor);
         Lines.rect(sx, sy, w, h);
         Draw.reset();
@@ -929,11 +936,11 @@ public class BoxSelect{
         // 选中框：半透明填充 + 边框
         Color modeColor = getModeColor();
         Draw.color(modeColor);
-        Draw.alpha(0.15f);
+        Draw.alpha(FILL_ALPHA);
         Fill.crect(x, y, w, h);
 
         Draw.color(modeColor);
-        Draw.alpha(0.8f);
+        Draw.alpha(BORDER_ALPHA);
         Lines.stroke(Scl.scl(1.5f), modeColor);
         Lines.rect(x, y, w, h);
         Draw.reset();
@@ -998,7 +1005,7 @@ public class BoxSelect{
             }
 
             Draw.color(c);
-            Draw.alpha(0.35f);
+            Draw.alpha(SCROLLBAR_SEG_ALPHA);
             Fill.crect(scrollbarX, elemTop - elemColorH, scrollbarW, elemColorH);
 
             cy += elemH + space;
@@ -1037,7 +1044,7 @@ public class BoxSelect{
         float dx = localMouse.x - dragStartLocalX;
         float dy = localMouse.y - dragStartLocalY;
 
-        drawElementsWithOffset(canvas, dx, dy, 0.5f);
+        drawElementsWithOffset(canvas, dx, dy, COPY_PREVIEW_ALPHA);
     }
 
     /** 统一的绘制方法：保存矩阵 → 设置 translation → 临时修改 x/y → draw → finally 恢复

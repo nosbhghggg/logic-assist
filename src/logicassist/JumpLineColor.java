@@ -12,10 +12,10 @@ import mindustry.*;
 import mindustry.gen.*;
 import mindustry.graphics.*;
 import mindustry.logic.*;
+import mindustry.logic.LStatements.*;
 import mindustry.ui.*;
 import mindustry.ui.dialogs.*;
 
-import java.lang.reflect.*;
 import java.util.*;
 
 /**
@@ -29,8 +29,7 @@ import java.util.*;
  *   1 = 分散色（按目标 index，黄金角度 HSV）
  *   2 = 积木色（按目标积木类别颜色提亮 1.4 倍）
  *
- * 原 jump-line-color JS 脚本模组 (v9) 的 Java 重写版本。
- * 消除了 Rhino 引擎的限制：无需 boolc 包装、无需反射备用方案、类型安全。
+ * JumpStatement.dest 是 public 字段，直接 instanceof + 强转访问，无需反射。
  */
 public class JumpLineColor{
 
@@ -45,10 +44,6 @@ public class JumpLineColor{
     private static final float GOLDEN_ANGLE = 137.508f;
     private static final Map<Integer, Color> indexColorCache = new HashMap<>();
     private static final Map<String, Color> blockColorCache = new HashMap<>();
-
-    // ---------- Reflection fallback (for non-standard LStatement subclasses) ----------
-    private static Field destField;
-    private static boolean destFieldChecked = false;
 
     // ==================================================================
     // Mode
@@ -126,30 +121,6 @@ public class JumpLineColor{
     }
 
     // ==================================================================
-    // Reflection fallback for JumpStatement.dest
-    // ==================================================================
-
-    /**
-     * 获取 JumpStatement.dest 字段（反射备用方案）。
-     *
-     * Java 模组可以直接 instanceof + 强转访问 JumpStatement.dest，
-     * 此方法仅用于处理其他模组可能添加的自定义跳转语句。
-     */
-    private static Field getDestField(LStatement st){
-        if(destField != null) return destField;
-        if(destFieldChecked) return null;
-        destFieldChecked = true;
-        try{
-            destField = st.getClass().getField("dest");
-        }catch(NoSuchFieldException e){
-            // 非跳转语句，正常情况
-        }catch(Exception e){
-            Log.info("[LogicAssist] Failed to get dest field: " + e);
-        }
-        return destField;
-    }
-
-    // ==================================================================
     // Patch JumpCurve
     // ==================================================================
 
@@ -180,22 +151,10 @@ public class JumpLineColor{
                 LStatement st = elem.st;
                 if(st == null) return;
 
-                // 获取跳转目标
+                // 获取跳转目标：JumpStatement.dest 是 public 字段，直接强转
                 LCanvas.StatementElem dest = null;
-
-                // 直接类型检查（Java 模组优势：无需 Rhino 反射包装）
-                if(st instanceof LStatements.JumpStatement){
-                    dest = ((LStatements.JumpStatement)st).dest;
-                }else{
-                    // 反射备用：处理其他模组可能添加的自定义跳转语句
-                    Field field = getDestField(st);
-                    if(field != null){
-                        try{
-                            dest = (LCanvas.StatementElem)field.get(st);
-                        }catch(IllegalAccessException e){
-                            // 忽略访问异常
-                        }
-                    }
+                if(st instanceof JumpStatement){
+                    dest = ((JumpStatement)st).dest;
                 }
 
                 // 设置颜色
@@ -217,7 +176,7 @@ public class JumpLineColor{
                 if(style != null) style.imageUpColor = button.color;
 
             }catch(Exception e){
-                Log.info("[LogicAssist] JumpLineColor error: " + e);
+                Log.warn("[LogicAssist] JumpLineColor error: " + e);
             }
         });
     }
@@ -263,15 +222,11 @@ public class JumpLineColor{
                 table.checkPref(SETTING_BLOCKCOLOR, false, b -> {});
             });
         }catch(Exception e){
-            Log.info("[LogicAssist] Failed to setup settings: " + e);
+            Log.warn("[LogicAssist] Failed to setup settings: " + e);
         }
     }
 
-    // ==================================================================
-    // Cache management
-    // ==================================================================
-
-    /** 清空颜色缓存，在编辑器关闭时调用，避免积木增删后旧缓存残留 */
+    /** 清空颜色缓存，在编辑器关闭时调用 */
     public static void clearCache(){
         indexColorCache.clear();
         blockColorCache.clear();
