@@ -238,7 +238,7 @@ public class ExprHook{
                 int lineCount = (exprStmt.lastOps != null) ? exprStmt.lastOps.size() : 1;
                 int endLine = mlogLine + lineCount - 1;
                 // 多行显示区间，单行显示数字
-                setAddressLabel(elem, lineCount > 1 ? (mlogLine + "→" + endLine) : (mlogLine + ""));
+                setAddressLabel(elem, lineCount > 1 ? (mlogLine + "-" + endLine) : (mlogLine + ""));
                 mlogLine += lineCount;
             }else{
                 setAddressLabel(elem, mlogLine + "");

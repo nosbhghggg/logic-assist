@@ -13,6 +13,7 @@ import logicassist.expr.*;
  * - load() 完成后立即折叠 op 链为零延迟（原方案等 5 帧）
  * - save() 保存前先展开所有 ExprStatement，保存纯 mlog 后重新折叠
  * - draw() 在原版绘制完成后重新设置 addressLabel，显示 mlog 行号区间
+ *   然后清除 invalidated，阻止下一帧 layout() 的 updateAddress 覆盖
  * - 内联 JumpLineColor.patchAllCurves，消除独立循环
  */
 public class LogicCanvas extends LCanvas{
@@ -43,6 +44,10 @@ public class LogicCanvas extends LCanvas{
         ExprHook.updateAddressLabels(this);
         // 内联 JumpLineColor：patch 新增的 JumpCurve
         JumpLineColor.patchAllCurves(this);
+        // 关键：updateAddressLabels 设置文本后 Label 宽度变化触发 invalidate
+        // 清除 invalidated 阻止下一帧 layout() → updateAddress 覆盖我们的行号
+        // 如果确实需要 layout（拖拽/添加积木），那些操作会重新 invalidate
+        statements.invalidated = false;
     }
 
     // ===== 字段访问器：供 BoxSelect 跨包访问 =====
