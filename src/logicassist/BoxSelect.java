@@ -1004,9 +1004,13 @@ public class BoxSelect{
         Draw.reset();
     }
 
-    /** 在正确的 transform 矩阵内重画选中积木，确保积木画在插入阴影上方 */
+    /** 在正确的 transform 矩阵内重画选中积木，确保积木画在插入阴影上方。
+     *  DRAGGING_MOVE 时用选中积木的 translation（鼠标偏移）作为绘制偏移。 */
     private static void redrawSelectedBlocksOnTop(LCanvas canvas){
-        drawElementsWithOffset(canvas, 0, 0, 1f);
+        if(selected.isEmpty()) return;
+        // 所有选中积木共享相同的 translation（在 updateDrag 中统一设置）
+        StatementElem first = selected.iterator().next();
+        drawElementsWithOffset(canvas, first.translation.x, first.translation.y, 1f);
     }
 
     /** 复制模式：绘制半透明的积木预览跟随鼠标。 */
