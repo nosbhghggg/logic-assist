@@ -277,10 +277,10 @@ public class ExprHook{
         }
     }
 
-    /** 更新标签后立即重画每个 StatementElem 的 addressLabel。
-     *  在 super.draw() 之后调用，此时原版已用 updateAddress 的行号画完，
-     *  我们设置正确的 mlog 行号文本后立即重画 label，覆盖原版画面。 */
-    public static void updateAndRedrawAddressLabels(LCanvas canvas){
+    /** super.draw() 后重画 addressLabel，覆盖原版行号。
+     *  label 的坐标系：DragLayout 原点 → StatementElem 位置 → label 位置。
+     *  需要正确设置 Draw.transform 到 StatementElem 的世界坐标。 */
+    public static void redrawAddressLabels(LCanvas canvas){
         if(canvas == null || canvas.statements == null) return;
         Seq<Element> children = canvas.statements.getChildren();
 
@@ -308,7 +308,7 @@ public class ExprHook{
                 mlogLine++;
             }
 
-            // 设置文本并立即重画 label
+            // 跳过文本相同的（原版 updateAddress 已设好的单行号）
             try{
                 if(!addressLabelFieldChecked){
                     addressLabelFieldChecked = true;
@@ -317,14 +317,13 @@ public class ExprHook{
                 }
                 if(addressLabelField != null){
                     Label label = (Label)addressLabelField.get(elem);
-                    if(label != null){
+                    if(label != null && !text.equals(label.getText().toString())){
                         label.setText(text);
                         label.layout();
-                        // 在 statements 坐标系中重画 label（label 是 StatementElem 的子元素）
-                        Vec2 origin = canvas.statements.localToStageCoordinates(Tmp.v1.set(0, 0));
+                        // 重画 label：设置 transform 到 StatementElem 的世界坐标
+                        Vec2 elemOrigin = elem.localToStageCoordinates(Tmp.v1.set(0, 0));
                         Mat oldMat = Draw.trans();
-                        Draw.trans(new Mat().setToTranslation(origin.x, origin.y));
-                        // label 的 x/y 是相对于 StatementElem 的，需要加上 elem 的位置
+                        Draw.trans(new Mat().setToTranslation(elemOrigin.x, elemOrigin.y));
                         label.draw();
                         Draw.trans(oldMat);
                     }

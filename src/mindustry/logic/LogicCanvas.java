@@ -1,8 +1,9 @@
 package mindustry.logic;
 
 import arc.graphics.g2d.*;
+import arc.math.*;
 import arc.util.*;
-import arc.scene.ui.Label;
+import arc.scene.ui.*;
 import logicassist.*;
 import logicassist.expr.*;
 
@@ -11,13 +12,10 @@ import java.lang.reflect.*;
 /**
  * 夺舍版 LCanvas：继承原版 LCanvas，覆盖关键生命周期方法。
  *
- * 注意：虽然放在 mindustry.logic 包下，但模组类加载器与游戏类加载器不同，
- * 包级字段（dragging, privileged）仍需通过反射访问。
- *
  * 核心改进：
  * - load() 完成后立即折叠 op 链为零延迟
  * - save() 保存前先展开，保存后重新折叠
- * - draw() 在原版绘制完成后重新设置 addressLabel 并重画 label
+ * - draw() 中 super.draw() 后，重画每个 addressLabel 覆盖原版行号
  */
 public class LogicCanvas extends LCanvas{
 
@@ -44,12 +42,12 @@ public class LogicCanvas extends LCanvas{
 
     @Override
     public void draw(){
-        // 原版流程：validate() → layout() → updateAddress(i) → drawChildren（用原版行号画 label）
+        // 原版流程：validate() → layout() → updateAddress(i) → drawChildren
         super.draw();
 
-        // 此时 label 已经用原版行号画完了
-        // 重新设置标签为 mlog 行号，然后手动重画 label
-        ExprHook.updateAndRedrawAddressLabels(this);
+        // 此时所有 label 已经用原版行号画完
+        // 修改文本后重画 label 覆盖原版画面
+        ExprHook.redrawAddressLabels(this);
 
         JumpLineColor.patchAllCurves(this);
     }
