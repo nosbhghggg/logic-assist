@@ -1,7 +1,9 @@
 package logicassist;
 
 import arc.*;
+import arc.scene.*;
 import arc.scene.ui.layout.*;
+import arc.struct.*;
 import arc.util.*;
 import logicassist.expr.*;
 import mindustry.*;
@@ -58,6 +60,13 @@ public class LogicAssistMod extends Mod{
                 return;
             }
 
+            // 记录原 canvas 在 children 中的索引，用于后续恢复 z-order
+            // Cell.setElement 会把新元素添加到 children 末尾（最高 z-order），
+            // 导致 canvas 覆盖在 MindustryX LogicSupport 面板之上，使面板按钮不可点击。
+            // 替换后需将新 canvas 移回原位置，保持正确的 z-order。
+            int canvasIndex = dialog.getChildren().indexOf(old, true);
+            if(canvasIndex < 0) canvasIndex = 0;
+
             LogicCanvas lc = new LogicCanvas();
 
             // 通过 Cell.setElement 替换 UI 元素（自动移除旧元素、添加新元素到 table）
@@ -72,6 +81,17 @@ public class LogicAssistMod extends Mod{
 
             if(replaced){
                 dialog.canvas = lc;
+
+                // 恢复 z-order：将 canvas 从 children 末尾移回原位置。
+                // 直接操作 children Seq，避免 remove()/addChildAt() 触发 setScene 回调
+                // （LCanvas.StatementElem.setScene 在 scene=null 时会移除 JumpCurve，导致状态损坏）。
+                Seq<Element> children = dialog.getChildren();
+                int lastIdx = children.size - 1;
+                if(canvasIndex != lastIdx){
+                    children.remove(lastIdx);
+                    children.insert(canvasIndex, lc);
+                }
+
                 Log.info("[LogicAssist] Canvas replaced with LogicCanvas.");
             }else{
                 Log.err("[LogicAssist] Failed to find canvas cell!");

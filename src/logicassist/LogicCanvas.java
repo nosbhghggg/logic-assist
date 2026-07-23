@@ -1,5 +1,7 @@
 package logicassist;
 
+import arc.graphics.g2d.*;
+import arc.math.*;
 import arc.scene.*;
 import arc.scene.ui.*;
 import arc.scene.ui.layout.*;
@@ -75,8 +77,22 @@ public class LogicCanvas extends LCanvas{
 
     @Override
     public void draw(){
+        // 拖动期间，在 super.draw() 之前绘制插入指示器（在积木下方）
+        if(BoxSelect.isDragging()){
+            BoxSelect.drawInsertIndicatorUnder(this);
+        }
         super.draw();
         JumpLineColor.patchAllCurves(this);
+
+        // 当 overlay 不在前景时（IDLE/SELECTED），在画布绘制周期内绘制高亮和彩色滚动条。
+        // 避免 overlay.toFront() 干扰 MindustryX 等第三方 UI 的层级管理。
+        if(!BoxSelect.isSelecting() && !BoxSelect.isDragging()){
+            Mat oldTrans = new Mat().set(Draw.trans());
+            Draw.trans().idt();
+            BoxSelect.drawHighlights(this);
+            BoxSelect.drawColorScrollbar(this);
+            Draw.trans(oldTrans);
+        }
     }
 
     /**

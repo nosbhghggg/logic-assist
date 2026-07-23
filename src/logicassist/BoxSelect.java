@@ -71,12 +71,15 @@ public class BoxSelect{
     // ===== 反射字段（包级私有，缓存 Field）=====
     private static final Field draggingField;
     private static final Field privilegedField;
+    static Field needsLayoutField;
     static{
         try{
             draggingField = LCanvas.class.getDeclaredField("dragging");
             draggingField.setAccessible(true);
             privilegedField = LCanvas.class.getDeclaredField("privileged");
             privilegedField.setAccessible(true);
+            needsLayoutField = arc.scene.ui.layout.WidgetGroup.class.getDeclaredField("needsLayout");
+            needsLayoutField.setAccessible(true);
         }catch(Exception e){
             Log.err("[LogicAssist] Failed to access LCanvas fields", e);
             throw new RuntimeException(e);
@@ -109,6 +112,9 @@ public class BoxSelect{
     private static float dragStartLocalX, dragStartLocalY;
     private static int dragInsertPos = -1;
 
+    // 拖动期间保存的原始 child.y（用于恢复 layout() 的修改）
+    private static float[] dragBaseYs = null;
+
     // 插入指示器几何位置
     private static float indicatorX, indicatorY, indicatorW, indicatorH;
 
@@ -122,7 +128,7 @@ public class BoxSelect{
     private static boolean initialized = false;
     private static InputListener captureListener;
 
-    // 反射缓存（仅 vScrollBounds 仍需反射，ScrollPane 内部字段）
+    // 反射缓存（vScrollBounds）
     private static Field vScrollBoundsField;
 
     // ===== 初始化 =====
@@ -209,7 +215,8 @@ public class BoxSelect{
             // update() 不会被调用，形成死锁。直接执行 setSize + toFront 即可。
             overlay.setSize(Core.graphics.getWidth(), Core.graphics.getHeight());
             // 只在需要绘制覆盖层时才 toFront，避免干扰 MindustryX 等第三方 UI 的层级
-            if(state != State.IDLE){
+            // SELECTED/IDLE 状态的高亮和滚动条改由 LogicCanvas.draw() 绘制，无需 toFront
+            if(state == State.SELECTING || state == State.DRAGGING_MOVE || state == State.DRAGGING_COPY){
                 overlay.toFront();
             }
 
@@ -254,6 +261,44 @@ public class BoxSelect{
         return false;
     }
 
+    /** 兜底检测：点击位置是否落在某个 Button 的实际边界内。
+     *  当 arc 的 hit test 因父容器裁剪、层叠顺序等原因未命中按钮内部元素时，
+     *  通过遍历 target 所在 StatementElem 的子元素树，手动检测按钮边界。
+     *  避免 MindustryX 的 JUMP/pencil 等按钮被误判为"点击积木"而触发框选/拖动。 */
+    private static boolean isClickWithinButtonBounds(Element target, float stageX, float stageY){
+        // 找到 target 所在的 StatementElem
+        StatementElem stmt = null;
+        Element cur = target;
+        while(cur != null){
+            if(cur instanceof StatementElem){
+                stmt = (StatementElem)cur;
+                break;
+            }
+            cur = cur.parent;
+        }
+        if(stmt == null) return false;
+        return hasButtonAtRecursive(stmt, stageX, stageY);
+    }
+
+    /** 递归遍历元素树，检查是否有 Button 的边界包含指定 stage 坐标 */
+    private static boolean hasButtonAtRecursive(Element elem, float stageX, float stageY){
+        if(elem instanceof Button){
+            Vec2 local = elem.stageToLocalCoordinates(Tmp.v2.set(stageX, stageY));
+            // 加 2px 容差，避免边缘点击漏判
+            if(local.x >= -2f && local.x <= elem.getWidth() + 2f &&
+               local.y >= -2f && local.y <= elem.getHeight() + 2f){
+                return true;
+            }
+        }
+        if(elem instanceof Group){
+            Seq<Element> children = ((Group)elem).getChildren();
+            for(int i = 0; i < children.size; i++){
+                if(hasButtonAtRecursive(children.get(i), stageX, stageY)) return true;
+            }
+        }
+        return false;
+    }
+
     private static boolean handleTouchDown(InputEvent event, float x, float y, int pointer, KeyCode button){
         LCanvas canvas = getCanvas();
         if(canvas == null || !shouldIntercept(canvas)) return false;
@@ -272,15 +317,30 @@ public class BoxSelect{
         // 只处理 canvas 内的点击。
         // MindustryX 的 LogicSupport 左侧面板等非 canvas UI 直接放行，
         // 避免其按钮（ImageButton 内的 Image）进入 tryHijackButton 影响事件传递。
+        // z-order 已在 replaceCanvas 中修正（canvas 在 children 列表中的位置保持原样），
+        // 面板按钮的 hit test 能正确返回面板元素而非 canvas。
         if(!isDescendantOfCanvas(target, canvas)){
             return false;
         }
 
-        // canvas 内的按钮（Image）：检查是否是选中积木的按钮
+        // canvas 内的按钮：检查是否是选中积木的功能按钮
         if(isClickOnButton(target)){
             if(tryHijackButton(canvas, event, target)){
                 return true;
             }
+            return false;
+        }
+        // MindustryX 兼容：TextButton（如 JUMP 按钮、注释切换按钮）内部是 Label 而非 Image，
+        // 不被 isClickOnButton 捕获。必须放行给原版处理，否则会被当作"点击积木"拦截。
+        // 检查 target 自身或祖先链中是否有 Button
+        Element btnCheck = target;
+        while(btnCheck != null && !(btnCheck instanceof Button)) btnCheck = btnCheck.parent;
+        if(btnCheck != null){
+            return false;
+        }
+        // 兜底：hit test 可能因父容器裁剪/层叠等原因未命中按钮内部元素，
+        // 手动检测点击位置是否落在任何 Button 的边界内（MindustryX 的 JUMP/pencil 按钮等）
+        if(isClickWithinButtonBounds(target, stageCoords.x, stageCoords.y)){
             return false;
         }
 
@@ -531,11 +591,16 @@ public class BoxSelect{
         for(LStatement st : copies){
             st.setupUI();
         }
-        // JumpStatement 默认 copy() 用 write→read 序列化，dest（transient）为 null，
-        // setupUI() 是空方法不重建。手动从 destIndex 查找 StatementElem 赋值给 dest
-        resolveJumpDests(canvas);
 
         finalizeLayout(canvas);
+        // MI2 模式：layout 后调用 setupUI() 解析副本中 JumpStatement 的 dest
+        // JumpStatement.setupUI() 会从 destIndex 查找 elem.parent.getChildren() 解析 dest
+        for(LStatement st : copies){
+            if(st instanceof JumpStatement) st.setupUI();
+        }
+        // 更新所有 Jump 的 destIndex（反映插入后的新位置）并刷新跳转线
+        saveAllJumpUI(canvas);
+        canvas.statements.jumps.act(0f);
         // 先恢复所有积木的按钮图标（旧选中积木的 Icon.move 改回 Icon.copy）
         restoreButtonIcons(canvas);
         selected.clear();
@@ -601,6 +666,7 @@ public class BoxSelect{
         state = State.IDLE;
         dragInsertPos = -1;
         dragMoved = false;
+        dragBaseYs = null;
         clipboardCopies = null;
         clipboardSize = 0;
         clipboardSelectedIndices = null;
@@ -616,6 +682,13 @@ public class BoxSelect{
         dragStartLocalY = startLocal.y;
         dragInsertPos = -1;
         dragMoved = false;
+
+        // 保存所有积木的原始 y 坐标（layout() 会修改，拖动期间需要恢复）
+        Seq<Element> children = canvas.statements.getChildren();
+        dragBaseYs = new float[children.size];
+        for(int i = 0; i < children.size; i++){
+            dragBaseYs[i] = children.get(i).y;
+        }
 
         // 拖动模式：dragMode 持久模式 + Ctrl/中键临时覆盖。
         // 框选框/高亮框颜色由 getModeColor() 实时反映此判断，保证与松手后拖动模式一致。
@@ -633,14 +706,25 @@ public class BoxSelect{
         }
     }
 
-    /** 拖动期间每帧更新 translation 和插入位置 */
+    /** 拖动期间每帧更新 translation 和插入位置。
+     *  关键：不触发 layout()，而是恢复 dragBaseYs 后用 translation 做所有偏移。
+     *  translation 会被 localToAscendantCoordinates 正确计算，JumpCurve 能跟随。 */
     private static void updateDrag(LCanvas canvas, float mx, float my){
-        // 清除原版 dragging（防止原版 InputListener 残留干扰）
         clearDraggingField(canvas);
 
-        // invalidate + validate 获取基础布局（所有积木在原始位置）
-        canvas.statements.invalidate();
-        canvas.statements.validate();
+        Seq<Element> children = canvas.statements.getChildren();
+
+        // 恢复原始 y 坐标（防止 layout() 的修改累积）
+        if(dragBaseYs != null && dragBaseYs.length == children.size){
+            for(int i = 0; i < children.size; i++){
+                children.get(i).y = dragBaseYs[i];
+            }
+        }
+
+        // 重置 needsLayout，防止 draw() 中 validate() → layout() 覆盖我们的修改
+        try{
+            needsLayoutField.setBoolean(canvas.statements, false);
+        }catch(Exception ignored){}
 
         // 干净起点，避免累积
         resetAllTranslations(canvas);
@@ -665,12 +749,11 @@ public class BoxSelect{
         }
 
         // 腾位：将插入点下方的非选中积木向下移，撑开空间显示插入位置。
-        // 关键：直接修改 child.y（而非 translation），因为 JumpCurve.act 内部用
-        // localToAscendantCoordinates 定位，基于 child.y 不含 translation。
-        // 用 translation 腾位会导致跳转线与积木视觉位置错位、看似消失。
+        // 关键：用 translation 而非修改 child.y，因为 translation 会被
+        // localToAscendantCoordinates 正确计算，JumpCurve 能跟随。
         applyInsertShift(canvas);
 
-        // 腾位后更新跳转线位置——此时 child.y 已反映腾位，JumpCurve 能正确定位
+        // 腾位后更新跳转线位置——此时 translation 已反映腾位，JumpCurve 能正确定位
         canvas.statements.jumps.act(0f);
         updateIndicatorGeometry(canvas);
 
@@ -689,10 +772,11 @@ public class BoxSelect{
         float localY = local.y;
 
         if(state == State.DRAGGING_COPY){
-            // 复制模式：遍历所有 children（原积木在原位，插入位置可以在它们之间）
+            // 复制模式：遍历所有 children，用视觉位置（y + translation.y）计算
             for(int i = 0; i < children.size; i++){
                 Element child = children.get(i);
-                float centerLocalY = child.y + child.getHeight() / 2f;
+                float visualY = child.y + child.translation.y;
+                float centerLocalY = visualY + child.getHeight() / 2f;
                 if(localY > centerLocalY){
                     return i;
                 }
@@ -700,12 +784,12 @@ public class BoxSelect{
             return children.size;
         }
 
-        // 移动模式：跳过选中积木（它们已从原位移走）
-        int insertPos = 0;
+        // 移动模式：跳过选中积木（它们已从原位移走），用视觉位置计算
         int nonSelectedCount = 0;
         for(Element child : children){
             if(child instanceof StatementElem && selected.contains(child)) continue;
-            float centerLocalY = child.y + child.getHeight() / 2f;
+            float visualY = child.y + child.translation.y;
+            float centerLocalY = visualY + child.getHeight() / 2f;
             if(localY > centerLocalY){
                 return nonSelectedCount;
             }
@@ -716,36 +800,38 @@ public class BoxSelect{
 
     // ===== 腾位 =====
 
-    /** 移动模式：紧凑排列非选中积木，跳过选中积木消除其原始位置占用的空间。
-     *  选中积木仅用 translation 跟随鼠标，child.y 保持 validate 后的位置（不影响视觉）。
-     *  注意：totalHeight 只算非选中积木，否则顶部选中时会出现幽灵空格。 */
+    /** 移动模式：紧凑排列非选中积木，消除选中积木原始位置占用的空间。
+     *  用 translation 设置偏移（相对于 dragBaseYs 的原始位置），
+     *  这样 localToAscendantCoordinates 能正确计算，JumpCurve 跟随。 */
     private static void relayoutNonSelected(LCanvas canvas){
         Seq<Element> children = canvas.statements.getChildren();
         float space = Scl.scl(10f);
-        float width = canvas.statements.getWidth();
 
-        // 只计算非选中积木的总高度
-        float totalHeight = 0;
-        for(Element e : children){
+        // 从顶部开始紧凑排列非选中积木（用 translation 表示相对于原始位置的偏移）
+        float compactY = 0; // 紧凑布局中的累积 y（从顶部开始）
+        for(int i = 0; i < children.size; i++){
+            Element e = children.get(i);
             if(e instanceof StatementElem && selected.contains(e)) continue;
-            totalHeight += e.getPrefHeight() + space;
-        }
-        if(totalHeight > 0) totalHeight -= space;
-
-        // 从顶部开始紧凑排列非选中积木
-        float cy = 0;
-        for(Element e : children){
-            if(e instanceof StatementElem && selected.contains(e)) continue;
-            e.setSize(width, e.getPrefHeight());
-            e.setPosition(0, totalHeight - cy, Align.topLeft);
-            cy += e.getPrefHeight() + space;
+            // 原始位置（从顶部开始）：totalHeight - originalYFromTop
+            // 紧凑位置（从顶部开始）：compactY
+            // translation = 紧凑位置 - 原始位置（在 DragLayout 本地坐标系中，y 向上为正）
+            // 但 DragLayout 的 y 是从底部向上的，所以需要用 height 转换
+            float totalHeight = canvas.statements.getHeight();
+            float originalY = dragBaseYs != null && i < dragBaseYs.length ? dragBaseYs[i] : e.y;
+            // originalY 是底对齐的，转换为顶对齐：topY = totalHeight - originalY - height
+            // 紧凑位置的顶对齐：compactTopY = compactY
+            // 新的底对齐 y = totalHeight - compactY - height
+            // translation.y = 新底对齐y - 原始底对齐y
+            float newY = totalHeight - compactY - e.getPrefHeight();
+            float transY = newY - originalY;
+            e.setTranslation(0, transY);
+            compactY += e.getPrefHeight() + space;
         }
     }
 
     /** 腾位：将插入点下方的非选中积木向下移，撑开空间显示插入位置。
-     *  直接修改 child.y（非 translation），因为 JumpCurve.act 用 localToAscendantCoordinates
-     *  定位时基于 child.y，不含 translation。每帧在 invalidate+validate+relayoutNonSelected
-     *  后重新应用。选中积木在移动模式下用 translation 跟随鼠标。 */
+     *  用 translation 而非修改 child.y，因为 translation 会被
+     *  localToAscendantCoordinates 正确计算，JumpCurve 能跟随。 */
     private static void applyInsertShift(LCanvas canvas){
         if(dragInsertPos < 0 || selected.isEmpty()) return;
 
@@ -763,7 +849,8 @@ public class BoxSelect{
         if(state == State.DRAGGING_COPY){
             // 复制模式：dragInsertPos 是绝对索引，移该索引及以下的积木
             for(int i = dragInsertPos; i < children.size; i++){
-                children.get(i).y -= shiftAmount;
+                Element child = children.get(i);
+                child.setTranslation(child.translation.x, child.translation.y - shiftAmount);
             }
         }else{
             // 移动模式：dragInsertPos 是非选中积木的相对索引，
@@ -772,7 +859,7 @@ public class BoxSelect{
             for(Element child : children){
                 if(child instanceof StatementElem && selected.contains(child)) continue;
                 if(nonSelectedSeen >= dragInsertPos){
-                    child.y -= shiftAmount;
+                    child.setTranslation(child.translation.x, child.translation.y - shiftAmount);
                 }
                 nonSelectedSeen++;
             }
@@ -798,20 +885,20 @@ public class BoxSelect{
         float drawLocalX = 0;
 
         if(state == State.DRAGGING_COPY){
-            // 复制模式：dragInsertPos 是真实 child 索引，用所有 children 计算
+            // 复制模式：dragInsertPos 是真实 child 索引，用视觉位置计算
             if(children.isEmpty() || dragInsertPos == 0){
                 insertLocalY = canvas.statements.getHeight();
             }else if(dragInsertPos >= children.size){
                 Element last = children.get(children.size - 1);
-                insertLocalY = last.y - space;
+                insertLocalY = last.y + last.translation.y - space;
                 drawLocalX = last.x;
             }else{
                 Element before = children.get(dragInsertPos - 1);
-                insertLocalY = before.y - space;
+                insertLocalY = before.y + before.translation.y - space;
                 drawLocalX = before.x;
             }
         }else{
-            // 移动模式：用非选中 children 计算
+            // 移动模式：用非选中 children 的视觉位置计算
             List<Element> nonSelected = new ArrayList<>();
             for(Element child : children){
                 if(child instanceof StatementElem && selected.contains(child)) continue;
@@ -822,11 +909,11 @@ public class BoxSelect{
                 insertLocalY = canvas.statements.getHeight();
             }else if(dragInsertPos >= nonSelected.size()){
                 Element last = nonSelected.get(nonSelected.size() - 1);
-                insertLocalY = last.y - space;
+                insertLocalY = last.y + last.translation.y - space;
                 drawLocalX = last.x;
             }else{
                 Element before = nonSelected.get(dragInsertPos - 1);
-                insertLocalY = before.y - space;
+                insertLocalY = before.y + before.translation.y - space;
                 drawLocalX = before.x;
             }
         }
@@ -867,25 +954,27 @@ public class BoxSelect{
                 drawSelectionBox(canvas);
                 drawHighlights(canvas);
                 break;
-            case SELECTED:
-                drawHighlights(canvas);
-                break;
             case DRAGGING_MOVE:
-                drawInsertIndicator(canvas);
+                // 插入指示器在 LogicCanvas.draw() 中绘制（在积木下方）
                 redrawSelectedBlocksOnTop(canvas);
                 break;
             case DRAGGING_COPY:
                 // 复制模式：原积木在原位由 DragLayout.draw 正常绘制
-                // 画插入指示器 + 半透明预览跟随鼠标
-                drawInsertIndicator(canvas);
+                // 插入指示器在 LogicCanvas.draw() 中绘制，半透明预览跟随鼠标
                 drawCopyPreview(canvas);
+                break;
+            case SELECTED:
+                // SELECTED 状态的高亮由 LogicCanvas.draw() 绘制，避免 toFront 干扰 MindustryX
                 break;
             default:
                 break;
         }
 
-        // 始终绘制彩色滚动条（无论什么状态）
-        drawColorScrollbar(canvas);
+        // 彩色滚动条：overlay 在前时（SELECTING/DRAGGING）由此绘制；
+        // IDLE/SELECTED 时由 LogicCanvas.draw() 绘制
+        if(state == State.SELECTING || state == State.DRAGGING_MOVE || state == State.DRAGGING_COPY){
+            drawColorScrollbar(canvas);
+        }
     }
 
     /** 返回框选框/高亮框颜色，实时反映"松手后会进入的拖动模式"。
@@ -930,7 +1019,7 @@ public class BoxSelect{
         Draw.reset();
     }
 
-    private static void drawHighlights(LCanvas canvas){
+    public static void drawHighlights(LCanvas canvas){
         if(selected.isEmpty()) return;
 
         // 计算所有选中积木的总包围框
@@ -964,7 +1053,7 @@ public class BoxSelect{
     }
 
     /** 绘制彩色滚动条：在 ScrollPane 的垂直滚动条轨道上，按每个积木的比例绘制对应类别颜色。 */
-    private static void drawColorScrollbar(LCanvas canvas){
+    public static void drawColorScrollbar(LCanvas canvas){
         ScrollPane pane = canvas.pane;
         if(pane == null || !pane.hasScroll()) return;
 
@@ -1029,6 +1118,29 @@ public class BoxSelect{
         }
         Draw.flush();
         ScissorStack.pop();
+        Draw.reset();
+    }
+
+    /** 是否正在拖动（供 LogicCanvas.draw() 查询） */
+    public static boolean isDragging(){
+        return state == State.DRAGGING_MOVE || state == State.DRAGGING_COPY;
+    }
+
+    /** 是否正在框选（供 LogicCanvas.draw() 查询） */
+    public static boolean isSelecting(){
+        return state == State.SELECTING;
+    }
+
+    /** 在画布坐标系中绘制插入指示器（在积木下方）。
+     *  供 LogicCanvas.draw() 在 super.draw() 之前调用。
+     *  此时 Draw transform 是 LCanvas 的变换，需将 stage 坐标转换为 LCanvas 本地坐标。 */
+    public static void drawInsertIndicatorUnder(LCanvas canvas){
+        if(dragInsertPos < 0) return;
+        // indicatorX/Y/W/H 是 stage 坐标，转换为 LCanvas 本地坐标
+        // （Draw transform 是 LCanvas 的变换，本地坐标经变换后映射到正确的 stage 位置）
+        Vec2 local = canvas.localToAscendantCoordinates(null, Tmp.v1.set(indicatorX, indicatorY));
+        Draw.reset();
+        Tex.pane.draw(local.x, local.y, indicatorW, indicatorH);
         Draw.reset();
     }
 
@@ -1100,6 +1212,7 @@ public class BoxSelect{
         clearDraggingField(canvas);
 
         resetAllTranslations(canvas);
+        dragBaseYs = null;
 
         List<StatementElem> sorted = getSortedSelected(canvas);
         Seq<Element> children = canvas.statements.getChildren();
@@ -1153,6 +1266,7 @@ public class BoxSelect{
         clearDraggingField(canvas);
 
         resetAllTranslations(canvas);
+        dragBaseYs = null;
 
         if(clipboardCopies == null || clipboardCopies.isEmpty()){
             enterSelectedState(canvas);
@@ -1181,19 +1295,23 @@ public class BoxSelect{
         int actualInsert = Math.max(0, Math.min(insertPos, canvas.statements.getChildren().size));
 
         adjustJumpDestIndices(copies, clipboardSelectedIndices, actualInsert, copies.size);
-
-        // 先全部插入，再统一 setupUI（避免 jump.setupUI() 找不到未插入的副本）
+        // 先全部插入，再统一 setupUI
         for(int i = 0; i < copies.size; i++){
             canvas.addAt(actualInsert + i, copies.get(i));
         }
         for(LStatement st : copies){
             st.setupUI();
         }
-        // JumpStatement 默认 copy() 用 write→read 序列化，dest（transient）为 null，
-        // setupUI() 是空方法不重建。手动从 destIndex 查找 StatementElem 赋值给 dest
-        resolveJumpDests(canvas);
 
         finalizeLayout(canvas);
+        // MI2 模式：layout 后调用 setupUI() 解析副本中 JumpStatement 的 dest
+        // JumpStatement.setupUI() 会从 destIndex 查找 elem.parent.getChildren() 解析 dest
+        for(LStatement st : copies){
+            if(st instanceof JumpStatement) st.setupUI();
+        }
+        // 更新所有 Jump 的 destIndex（反映插入后的新位置）并刷新跳转线
+        saveAllJumpUI(canvas);
+        canvas.statements.jumps.act(0f);
         reselectRange(canvas, actualInsert, copies.size);
 
         clipboardCopies = null;
@@ -1208,6 +1326,7 @@ public class BoxSelect{
         clearDraggingField(canvas);
 
         resetAllTranslations(canvas);
+        dragBaseYs = null;
         clipboardCopies = null;
         clipboardSize = 0;
         clipboardSelectedIndices = null;
