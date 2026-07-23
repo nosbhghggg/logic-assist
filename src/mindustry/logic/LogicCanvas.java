@@ -44,10 +44,6 @@ public class LogicCanvas extends LCanvas{
         ExprHook.updateAddressLabels(this);
         // 内联 JumpLineColor：patch 新增的 JumpCurve
         JumpLineColor.patchAllCurves(this);
-        // 关键：updateAddressLabels 设置文本后 Label 宽度变化触发 invalidate
-        // 清除 invalidated 阻止下一帧 layout() → updateAddress 覆盖我们的行号
-        // 如果确实需要 layout（拖拽/添加积木），那些操作会重新 invalidate
-        statements.invalidated = false;
     }
 
     // ===== 字段访问器：供 BoxSelect 跨包访问 =====
