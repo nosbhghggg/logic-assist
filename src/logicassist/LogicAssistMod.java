@@ -15,7 +15,7 @@ import mindustry.mod.*;
  * 逻辑编辑器增强模组，提供跳转线着色、框选批量操作、复杂表达式编辑等功能。
  * 继承 {@link Mod}，在 init() 中注册事件监听和设置项。
  *
- * 夺舍架构：用 LogicCanvas 替换原版 LCanvas，实现零延迟表达式折叠。
+ * 用 LogicCanvas 替换原版 LCanvas，实现零延迟表达式折叠。
  */
 public class LogicAssistMod extends Mod{
 
@@ -34,7 +34,7 @@ public class LogicAssistMod extends Mod{
         Events.on(ClientLoadEvent.class, e -> {
             Log.info("[LogicAssist] Client loaded, initializing features...");
 
-            // 夺舍：用 LogicCanvas 替换原版 LCanvas
+            // 用 LogicCanvas 替换原版 LCanvas
             replaceCanvas();
 
             JumpLineColor.setupSettings();

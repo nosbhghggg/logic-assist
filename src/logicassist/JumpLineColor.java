@@ -45,9 +45,7 @@ public class JumpLineColor{
     private static final Map<Integer, Color> indexColorCache = new HashMap<>();
     private static final Map<String, Color> blockColorCache = new HashMap<>();
 
-    // ==================================================================
-    // Mode
-    // ==================================================================
+    // ===== Mode =====
 
     /**
      * 获取当前着色模式。
@@ -62,9 +60,7 @@ public class JumpLineColor{
         }
     }
 
-    // ==================================================================
-    // Color generation
-    // ==================================================================
+    // ===== Color generation =====
 
     /**
      * 按目标 index 生成黄金角度 HSV 颜色。
@@ -120,9 +116,7 @@ public class JumpLineColor{
         return colorForIndex(dest.index);
     }
 
-    // ==================================================================
-    // Patch JumpCurve
-    // ==================================================================
+    // ===== Patch JumpCurve =====
 
     /**
      * 为单个 JumpCurve 注入着色回调。
@@ -157,7 +151,6 @@ public class JumpLineColor{
                     dest = ((JumpStatement)st).dest;
                 }
 
-                // 设置颜色
                 if(dest == null){
                     button.color.set(Color.white);
                 }else if(button.hasMouse()){
@@ -196,9 +189,7 @@ public class JumpLineColor{
         }
     }
 
-    // ==================================================================
-    // Settings
-    // ==================================================================
+    // ===== Settings =====
 
     /**
      * 在主设置菜单中添加 "Logic Assist" 分类。

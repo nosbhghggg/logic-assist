@@ -11,7 +11,7 @@ import mindustry.logic.*;
 import java.lang.reflect.*;
 
 /**
- * 夺舍版 LCanvas：继承原版 LCanvas，覆盖关键生命周期方法。
+ * 继承原版 LCanvas，覆盖关键生命周期方法。
  *
  * 行号更新策略（v4 - act 中修改 + 重置 needsLayout）：
  *

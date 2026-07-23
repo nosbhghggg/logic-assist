@@ -15,10 +15,10 @@ import java.util.*;
 /**
  * 表达式集成钩子：提供 op 链 ↔ 表达式的双向转换。
  *
- * 夺舍架构后：
+ * 集成后：
  * - foldAll() 由 LogicCanvas.load() 直接调用，零延迟
  * - save() 由 LogicCanvas.save() 调用：unfoldAll → super.save → foldAll
- * - 行号由 LogicDragLayout.layout() 自动设置，不再需要反射覆盖 addressLabel
+ * - 行号由 LogicCanvas.act() 更新
  * - LogicIO.allStatements 是 public static 字段，直接访问无需反射
  * - updateJumpHeights 是 DragLayout 的 public 字段，直接访问
  *

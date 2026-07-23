@@ -36,11 +36,11 @@ import java.util.*;
  * - 布局层：拖动期间 relayoutNonSelected 跳过选中积木 + applyInsertShiftViaTranslation
  *   用 translation 腾位（不修改 child.y，避免 layout() 重置导致闪烁）。
  *   clearDraggingField 防止原版 layout() 跳过错误积木。
- * - 夺舍按钮：选中积木后劫持其功能按钮（删除→批量删除，+→批量复制，复制→模式切换）。
+ * - 接管按钮：选中积木后劫持其功能按钮（删除→批量删除，+→批量复制，复制→模式切换）。
  *
  * 交互流程：
  *   1. 空白点击拖动 → 框选积木（蓝=移动模式，绿=复制模式）
- *   2. 释放 → 选中积木高亮，显示工具栏，积木按钮被夺舍
+ *   2. 释放 → 选中积木高亮，显示工具栏，积木按钮被接管
  *   3. 拖动选中积木 → 积木/半透明预览跟随鼠标，显示插入指示器
  *   4. 松手 → 积木移动/复制到新位置
  *   5. Ctrl+点击单积木 → 选中并复制拖动
@@ -125,9 +125,7 @@ public class BoxSelect{
     // 反射缓存（仅 vScrollBounds 仍需反射，ScrollPane 内部字段）
     private static Field vScrollBoundsField;
 
-    // ==================================================================
-    // 初始化
-    // ==================================================================
+    // ===== 初始化 =====
 
     public static void init(){
         Core.app.post(() -> {
@@ -210,7 +208,10 @@ public class BoxSelect{
             // 不使用 visible 控制显示——visible=false 会导致 act() 不执行，
             // update() 不会被调用，形成死锁。直接执行 setSize + toFront 即可。
             overlay.setSize(Core.graphics.getWidth(), Core.graphics.getHeight());
-            overlay.toFront();
+            // 只在需要绘制覆盖层时才 toFront，避免干扰 MindustryX 等第三方 UI 的层级
+            if(state != State.IDLE){
+                overlay.toFront();
+            }
 
             // 拖拽期间每帧重新计算插入指示器位置（滚轮滚动时 touchDragged 不触发）
             if(state == State.DRAGGING_MOVE || state == State.DRAGGING_COPY){
@@ -225,9 +226,7 @@ public class BoxSelect{
         });
     }
 
-    // ==================================================================
-    // 事件处理（Capture 阶段，在 target 之前执行）
-    // ==================================================================
+    // ===== 事件处理（Capture 阶段，在 target 之前执行）=====
 
     /** 判断当前事件是否应该由我们处理。
      *  只在 LogicDialog 显示且 canvas 可用时才介入。 */
@@ -267,22 +266,21 @@ public class BoxSelect{
         // 右键在 touchDown 不会被触发（mouseRight），但以防万一
         if(button == KeyCode.mouseRight) return false;
 
-        // 检测点击目标
         Vec2 stageCoords = Tmp.v1.set(x, y);
         Element target = event.targetActor;
 
-        // 如果点在按钮上（Image），检查是否是选中积木的按钮
-        if(isClickOnButton(target)){
-            // 尝试夺舍：如果点击的是选中积木上的按钮，执行批量操作
-            if(tryHijackButton(canvas, event, target)){
-                return true; // 已拦截
-            }
-            return false; // 非选中积木的按钮，放行给原版
+        // 只处理 canvas 内的点击。
+        // MindustryX 的 LogicSupport 左侧面板等非 canvas UI 直接放行，
+        // 避免其按钮（ImageButton 内的 Image）进入 tryHijackButton 影响事件传递。
+        if(!isDescendantOfCanvas(target, canvas)){
+            return false;
         }
 
-        // 关键：只有点击在 canvas（LCanvas）内部时才介入
-        // 返回按钮、变量按钮等在 LogicDialog.buttons 区，不在 canvas 内，放行给原版
-        if(!isDescendantOfCanvas(target, canvas)){
+        // canvas 内的按钮（Image）：检查是否是选中积木的按钮
+        if(isClickOnButton(target)){
+            if(tryHijackButton(canvas, event, target)){
+                return true;
+            }
             return false;
         }
 
@@ -290,13 +288,11 @@ public class BoxSelect{
         if(canvas.pane != null && canvas.pane.hasScroll()){
             float paneX = canvas.pane.x;
             float paneW = canvas.pane.getWidth();
-            // 滚动条区域：右侧 14px
             if(stageCoords.x > paneX + paneW - SCROLLBAR_WIDTH){
                 return false;
             }
         }
 
-        // 沿祖先链查找 StatementElem
         StatementElem clickedStmt = null;
         Element current = target;
         while(current != null){
@@ -404,22 +400,20 @@ public class BoxSelect{
     }
 
     // ==================================================================
-    // 夺舍按钮（方向1：劫持选中积木上的功能按钮）
+    // 接管按钮（方向1：劫持选中积木上的功能按钮）
     // ==================================================================
 
-    /** 尝试夺舍选中积木上的按钮点击。
+    /** 尝试接管选中积木上的按钮点击。
      *  如果点击的是选中积木上的按钮（删除/+号/复制），执行批量操作并拦截事件。
      *  @return true 如果已拦截，false 如果应放行 */
     private static boolean tryHijackButton(LCanvas canvas, InputEvent event, Element target){
         if(selected.isEmpty()) return false;
 
-        // 从 Image 向上找 ImageButton
         Element btn = target.parent;
         while(btn != null && !(btn instanceof ImageButton)) btn = btn.parent;
         if(btn == null) return false;
         ImageButton button = (ImageButton)btn;
 
-        // 从 ImageButton 向上找 StatementElem
         StatementElem stmtElem = null;
         Element p = btn.parent;
         while(p != null){
@@ -431,7 +425,7 @@ public class BoxSelect{
         }
         if(stmtElem == null || !selected.contains(stmtElem)) return false;
 
-        // 识别按钮：通过 style.imageUp（包括被夺舍后改过的图标）
+        // 识别按钮：通过 style.imageUp（包括被接管后改过的图标）
         Drawable icon = button.getStyle().imageUp;
         // 删除按钮：Icon.cancel → 批量删除
         if(icon == Icon.cancel){
@@ -467,7 +461,6 @@ public class BoxSelect{
 
     /** 在 StatementElem 中查找指定图标的 ImageButton 并替换图标 */
     private static void findAndSetIcon(StatementElem elem, Drawable oldIcon, Drawable newIcon){
-        // 递归查找 ImageButton
         findAndSetIconRecursive(elem, oldIcon, newIcon);
     }
 
@@ -546,9 +539,7 @@ public class BoxSelect{
         Log.debug("[LogicAssist] Duplicated " + copies.size + " blocks below selection.");
     }
 
-    // ==================================================================
-    // 框选
-    // ==================================================================
+    // ===== 框选 =====
 
     private static void startBoxSelect(LCanvas canvas, float mx, float my){
         selStartX = mx;
@@ -584,7 +575,6 @@ public class BoxSelect{
     }
 
     private static void clearSelection(){
-        // 恢复按钮图标
         LCanvas canvas = getCanvas();
         if(canvas != null) restoreButtonIcons(canvas);
         selected.clear();
@@ -611,9 +601,7 @@ public class BoxSelect{
         clipboardSelectedIndices = null;
     }
 
-    // ==================================================================
-    // 拖动
-    // ==================================================================
+    // ===== 拖动 =====
 
     private static void startDrag(LCanvas canvas, float mx, float my, KeyCode button){
         dragStartMouseX = mx;
@@ -686,18 +674,14 @@ public class BoxSelect{
 
         // 更新跳转线位置（原积木未动，位置正确）
         canvas.statements.jumps.act(0f);
-        // 计算指示器几何
         updateIndicatorGeometry(canvas);
 
-        // 检查右键/Esc 取消
         if(Core.input.keyTap(KeyCode.mouseRight) || Core.input.keyTap(KeyCode.escape)){
             cancelDrag(canvas);
         }
     }
 
-    // ==================================================================
-    // 插入位置计算
-    // ==================================================================
+    // ===== 插入位置计算 =====
 
     private static int computeInsertPosition(LCanvas canvas, float stageY){
         Seq<Element> children = canvas.statements.getChildren();
@@ -732,16 +716,12 @@ public class BoxSelect{
         return nonSelectedCount;
     }
 
-    // ==================================================================
-    // 手动布局（已废弃）
-    // ==================================================================
+    // ===== 手动布局（已废弃）=====
     // 历史上这里曾有 relayoutNonSelected 和 applyInsertShiftViaTranslation 两个方法，
     // 分别用于 compact 非选中积木和用 translation 腾位。两者都导致顽固 bug（顶部空白、
     // 跳转线错位），已删除。详见 updateDrag 中的注释说明放弃腾位的原因。
 
-    // ==================================================================
-    // 指示器几何
-    // ==================================================================
+    // ===== 指示器几何 =====
 
     private static void updateIndicatorGeometry(LCanvas canvas){
         if(dragInsertPos < 0) return;
@@ -800,9 +780,7 @@ public class BoxSelect{
         indicatorH = totalH;
     }
 
-    // ==================================================================
-    // 自动滚动
-    // ==================================================================
+    // ===== 自动滚动 =====
 
     private static void autoScroll(LCanvas canvas){
         if(canvas.pane == null) return;
@@ -818,9 +796,7 @@ public class BoxSelect{
         }
     }
 
-    // ==================================================================
-    // 绘制
-    // ==================================================================
+    // ===== 绘制 =====
 
     private static void drawOverlay(){
         LCanvas canvas = getCanvas();
@@ -1060,14 +1036,11 @@ public class BoxSelect{
 
         Draw.trans(oldTrans);
     }
-    // ==================================================================
-    // 拖动移动
-    // ==================================================================
+    // ===== 拖动移动 =====
 
     private static void executeDragMove(LCanvas canvas, int insertPos){
         clearDraggingField(canvas);
 
-        // updateDrag 中 applyInsertShiftViaTranslation 给非选中积木也设了 translation
         resetAllTranslations(canvas);
 
         List<StatementElem> sorted = getSortedSelected(canvas);
@@ -1096,9 +1069,7 @@ public class BoxSelect{
         Log.debug("[LogicAssist] Drag-moved " + count + " blocks to position " + actualInsert);
     }
 
-    // ==================================================================
-    // 拖动复制
-    // ==================================================================
+    // ===== 拖动复制 =====
 
     private static void prepareCopyData(LCanvas canvas){
         List<StatementElem> sorted = getSortedSelected(canvas);
@@ -1205,9 +1176,7 @@ public class BoxSelect{
         Log.debug("[LogicAssist] Deleted " + count + " blocks.");
     }
 
-    // ==================================================================
-    // 辅助方法
-    // ==================================================================
+    // ===== 辅助方法 =====
 
     private static List<StatementElem> getSortedSelected(LCanvas canvas){
         List<StatementElem> sorted = new ArrayList<>(selected);
@@ -1252,7 +1221,7 @@ public class BoxSelect{
                 selected.add((StatementElem)newChildren.get(i));
             }
         }
-        // 夺舍新选中积木的 copy/move 按钮图标
+        // 接管新选中积木的 copy/move 按钮图标
         updateSelectedButtonIcons(canvas);
     }
 

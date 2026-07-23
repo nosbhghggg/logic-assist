@@ -25,7 +25,7 @@ import java.util.*;
  * 关键设计：
  * - write() 输出 op 链文本，保证保存的代码始终是标准 mlog
  * - copy() 直接复制字段，不走 write→read 序列化（防止复制时展开）
- * - 行号显示由 LogicDragLayout.layout() 自动管理，不在此类处理
+ * - 行号显示由 LogicCanvas 管理，不在此类处理
  */
 public class ExprStatement extends LStatement{
 
@@ -213,7 +213,7 @@ public class ExprStatement extends LStatement{
 
     @Override
     public LStatement copy(){
-        Log.info("[LogicAssist] ExprStatement.copy() called: dest=@ expr=@", dest, expr);
+        Log.debug("[LogicAssist] ExprStatement.copy() called: dest=@ expr=@", dest, expr);
         ExprStatement copy = new ExprStatement();
         copy.dest = this.dest;
         copy.expr = this.expr;
