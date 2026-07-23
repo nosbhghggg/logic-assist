@@ -116,11 +116,11 @@ public class ExprStatement extends LStatement{
         float exprMaxWidth = Scl.scl(LCanvas.useRows() ? 400f : 900f) - Scl.scl(130f);
 
         // Stack 叠放 Label 和 TextField，占同一空间
-        // Stack cell 用固定 width 约束，内部 Label 在此宽度内 wrap
+        // Stack cell 用固定 width + maxWidth 约束，防止 TextField 撑大 prefWidth
         arc.scene.ui.layout.Stack stack = new arc.scene.ui.layout.Stack();
         stack.add(exprLabel);
         stack.add(exprField);
-        table.add(stack).width(exprMaxWidth).padLeft(4f).fillX();
+        table.add(stack).width(exprMaxWidth).maxWidth(exprMaxWidth).padLeft(4f).fillX();
         exprField.visible = false;
 
         // 点击 Label → 进入编辑模式

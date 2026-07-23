@@ -767,10 +767,15 @@ public class BoxSelect{
         shiftAmount -= space;
 
         if(state == State.DRAGGING_COPY){
-            // 复制模式：dragInsertPos 是真实 child 索引，移动所有该位置及之后的 children
-            for(int i = dragInsertPos; i < children.size; i++){
-                Element child = children.get(i);
-                child.setTranslation(child.translation.x, child.translation.y - shiftAmount);
+            // 复制模式：跳过选中积木，只移动非选中积木
+            // （选中积木用 translation 跟随鼠标，不应被腾位影响）
+            int nonSelectedIndex = 0;
+            for(Element child : children){
+                if(child instanceof StatementElem && selected.contains(child)) continue;
+                if(nonSelectedIndex >= dragInsertPos){
+                    child.setTranslation(child.translation.x, child.translation.y - shiftAmount);
+                }
+                nonSelectedIndex++;
             }
         }else{
             // 移动模式：dragInsertPos 是非选中索引，只移动非选中积木
