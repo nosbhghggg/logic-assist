@@ -2,6 +2,9 @@ package logicassist.expr;
 
 import arc.*;
 import arc.func.*;
+import arc.graphics.g2d.*;
+import arc.math.*;
+import arc.math.geom.*;
 import arc.scene.*;
 import arc.scene.ui.*;
 import arc.struct.*;
@@ -271,6 +274,64 @@ public class ExprHook{
             }
         }catch(Exception e){
             // 反射失败，保持原版显示
+        }
+    }
+
+    /** 更新标签后立即重画每个 StatementElem 的 addressLabel。
+     *  在 super.draw() 之后调用，此时原版已用 updateAddress 的行号画完，
+     *  我们设置正确的 mlog 行号文本后立即重画 label，覆盖原版画面。 */
+    public static void updateAndRedrawAddressLabels(LCanvas canvas){
+        if(canvas == null || canvas.statements == null) return;
+        Seq<Element> children = canvas.statements.getChildren();
+
+        int mlogLine = 0;
+        for(Element child : children){
+            if(!(child instanceof StatementElem)) continue;
+            StatementElem elem = (StatementElem)child;
+
+            String text;
+            if(elem.st instanceof ExprStatement){
+                ExprStatement exprStmt = (ExprStatement)elem.st;
+                if(exprStmt.lastOps == null){
+                    try{
+                        exprStmt.lastOps = ExprCompiler.compile(exprStmt.dest, exprStmt.expr);
+                    }catch(Exception e){
+                        // 编译失败，按单行处理
+                    }
+                }
+                int lineCount = (exprStmt.lastOps != null) ? exprStmt.lastOps.size() : 1;
+                int endLine = mlogLine + lineCount - 1;
+                text = lineCount > 1 ? (mlogLine + "-" + endLine) : (mlogLine + "");
+                mlogLine += lineCount;
+            }else{
+                text = mlogLine + "";
+                mlogLine++;
+            }
+
+            // 设置文本并立即重画 label
+            try{
+                if(!addressLabelFieldChecked){
+                    addressLabelFieldChecked = true;
+                    addressLabelField = StatementElem.class.getDeclaredField("addressLabel");
+                    addressLabelField.setAccessible(true);
+                }
+                if(addressLabelField != null){
+                    Label label = (Label)addressLabelField.get(elem);
+                    if(label != null){
+                        label.setText(text);
+                        label.layout();
+                        // 在 statements 坐标系中重画 label（label 是 StatementElem 的子元素）
+                        Vec2 origin = canvas.statements.localToStageCoordinates(Tmp.v1.set(0, 0));
+                        Mat oldMat = Draw.trans();
+                        Draw.trans(new Mat().setToTranslation(origin.x, origin.y));
+                        // label 的 x/y 是相对于 StatementElem 的，需要加上 elem 的位置
+                        label.draw();
+                        Draw.trans(oldMat);
+                    }
+                }
+            }catch(Exception e){
+                // ignore
+            }
         }
     }
 
