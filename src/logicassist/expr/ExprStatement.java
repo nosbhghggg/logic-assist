@@ -112,15 +112,16 @@ public class ExprStatement extends LStatement{
         };
         updateLabel.run();
 
-        // 积木总宽 Scl.scl(targetWidth)，减去 dest 字段和 " = " 占用约 130f
-        float exprMaxWidth = Scl.scl(LCanvas.useRows() ? 400f : 900f) - Scl.scl(130f);
-
         // Stack 叠放 Label 和 TextField，占同一空间
-        // Stack cell 用固定 width + maxWidth 约束，防止 TextField 撑大 prefWidth
-        arc.scene.ui.layout.Stack stack = new arc.scene.ui.layout.Stack();
+        // 巧思：覆盖 getPrefWidth() 返回 0，让 Table 不被 Stack 的 prefWidth 撑开
+        // 实际宽度由 cell growX 填满 dest 右边剩余空间，自动适应窗口大小
+        arc.scene.ui.layout.Stack stack = new arc.scene.ui.layout.Stack(){
+            @Override
+            public float getPrefWidth(){ return 0; }
+        };
         stack.add(exprLabel);
         stack.add(exprField);
-        table.add(stack).width(exprMaxWidth).maxWidth(exprMaxWidth).padLeft(4f).fillX();
+        table.add(stack).growX().padLeft(4f).fillX();
         exprField.visible = false;
 
         // 点击 Label → 进入编辑模式
