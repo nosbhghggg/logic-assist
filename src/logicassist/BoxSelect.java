@@ -728,16 +728,21 @@ public class BoxSelect{
     // 手动布局（跳过选中积木 + 腾位）
     // ==================================================================
 
-    /** 跳过选中积木布局，模拟原版 DragLayout.layout() 的 dragging 跳过逻辑 */
+    /** 跳过选中积木布局，非选中积木紧凑排列（不为选中积木预留空间）。
+     *  腾位由 applyInsertShiftViaTranslation 负责，避免双重下移。 */
     private static void relayoutNonSelected(LCanvas canvas){
         Seq<Element> children = canvas.statements.getChildren();
         float space = Scl.scl(10f);
         float width = canvas.statements.getWidth();
 
+        // totalHeight 只算非选中积木：选中积木用 translation 跟随鼠标，
+        // 插入位置的腾位由 applyInsertShiftViaTranslation 处理。
         float totalHeight = 0;
         for(Element e : children){
+            if(e instanceof StatementElem && selected.contains(e)) continue;
             totalHeight += e.getPrefHeight() + space;
         }
+        totalHeight = Math.max(0, totalHeight - space);
 
         float cy = 0;
         for(Element e : children){

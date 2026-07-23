@@ -1,11 +1,16 @@
 package logicassist.expr;
 
+import arc.*;
+import arc.graphics.*;
+import arc.scene.*;
+import arc.scene.event.*;
 import arc.scene.ui.*;
 import arc.scene.ui.layout.*;
 import arc.util.*;
 import mindustry.logic.*;
 import mindustry.logic.LExecutor.*;
 import mindustry.logic.LStatements.*;
+import mindustry.ui.Styles;
 
 import java.util.*;
 
@@ -64,15 +69,107 @@ public class ExprStatement extends LStatement{
         // dest 字段
         field(table, dest, str -> dest = str);
         table.add(" = ");
-        // 表达式文本框（不使用 field() 以避免空格被替换为下划线）
-        table.field(expr, str -> {
-            expr = str;
+
+        // 表达式显示：Label（高亮 + 自动换行）与 TextField（编辑）切换
+        Label exprLabel = new Label("");
+        exprLabel.setWrap(true);
+        exprLabel.setAlignment(Align.left);
+        exprLabel.touchable = Touchable.enabled;
+
+        TextField exprField = new TextField(expr);
+        exprField.setStyle(Styles.nodeField);
+        exprField.setMessageText("expr");
+        // 允许所有字符（含空格、运算符），不走 LStatement.field() 的 sanitize
+        exprField.setFilter((f, c) -> true);
+        exprField.setMaxLength(0);
+        exprField.changed(() -> {
+            expr = exprField.getText();
             try{
                 lastOps = ExprCompiler.compile(dest, expr);
-            }catch(Exception e){
-                // 忽略输入中的语法错误
+            }catch(Exception ignored){
+                // 输入中的语法错误，保留旧 lastOps
             }
-        }).growX().padLeft(4f).get();
+        });
+
+        // 更新 Label 的高亮文本
+        Runnable updateLabel = () -> exprLabel.setText(highlightExpr(expr));
+        updateLabel.run();
+
+        // 点击 Label → 进入编辑模式
+        exprLabel.addListener(new ClickListener(){
+            @Override
+            public void clicked(InputEvent event, float x, float y){
+                exprField.setText(expr);
+                exprLabel.visible = false;
+                exprField.visible = true;
+                Core.scene.setKeyboardFocus(exprField);
+                Core.scene.setScrollFocus(exprField);
+            }
+        });
+
+        // TextField 失焦 → 切回 Label 显示
+        exprField.update(() -> {
+            if(exprField.visible && Core.scene.getKeyboardFocus() != exprField){
+                exprField.visible = false;
+                exprLabel.visible = true;
+                updateLabel.run();
+            }
+        });
+
+        // 用 Stack 叠放 Label 和 TextField，通过 visible 切换，避免并排占两份空间
+        arc.scene.ui.layout.Stack stack = new arc.scene.ui.layout.Stack();
+        stack.add(exprLabel);
+        stack.add(exprField);
+        table.add(stack).growX().padLeft(4f);
+        exprField.visible = false;
+    }
+
+    /** 把表达式转为带颜色标记的富文本，用于 Label 高亮显示。
+     *  复用 ExprCompiler.tokenize 分类着色，用 token.start 保留原始空白：
+     *  - 数字：金色
+     *  - 函数名：珊瑚色（后跟左括号）
+     *  - 变量名：白色
+     *  - 运算符/括号/逗号：浅灰 */
+    private String highlightExpr(String expr){
+        if(expr == null || expr.isEmpty()) return "";
+        StringBuilder sb = new StringBuilder();
+        try{
+            List<ExprCompiler.Token> tokens = ExprCompiler.tokenize(expr);
+            int lastEnd = 0;
+            for(int i = 0; i < tokens.size(); i++){
+                ExprCompiler.Token tok = tokens.get(i);
+                if(tok.type == ExprCompiler.TokType.EOF) break;
+
+                // 输出上一个 token 到当前 token 之间的原始空白
+                if(tok.start > lastEnd){
+                    sb.append(expr, lastEnd, tok.start);
+                }
+
+                String color;
+                if(tok.type == ExprCompiler.TokType.NUM){
+                    color = "goldenrod";
+                }else if(tok.type == ExprCompiler.TokType.IDENT){
+                    boolean isFunc = (i + 1 < tokens.size()
+                        && tokens.get(i + 1).type == ExprCompiler.TokType.LPAREN);
+                    color = isFunc ? "coral" : "white";
+                }else{
+                    color = "lightgray";
+                }
+                // 富文本中 [ ] 需转义为 [[ ]]
+                String text = tok.text.replace("[", "[[").replace("]", "]]");
+                sb.append("[").append(color).append("]").append(text).append("[]");
+                lastEnd = tok.start + tok.text.length();
+            }
+            // 尾部空白
+            if(lastEnd < expr.length()){
+                sb.append(expr, lastEnd, expr.length());
+            }
+        }catch(Exception e){
+            // 解析失败，原样返回（转义 [ ]）
+            sb.setLength(0);
+            sb.append(expr.replace("[", "[[").replace("]", "]]"));
+        }
+        return sb.toString();
     }
 
     @Override

@@ -109,7 +109,13 @@ public class ExprCompiler{
 
     // ===== Tokenizer =====
     enum TokType{ NUM, IDENT, OP, LPAREN, RPAREN, COMMA, EOF }
-    static class Token{ final TokType type; final String text; Token(TokType t,String s){type=t;text=s;} }
+    static class Token{
+        final TokType type;
+        final String text;
+        /** token 在原始字符串中的起始位置（用于高亮保留原始空白） */
+        final int start;
+        Token(TokType t, String s, int start){ this.type = t; this.text = s; this.start = start; }
+    }
 
     static final String[] MULTI_OPS = {"===", ">>>", "<=", ">=", "==", "!=", "<<", ">>", "%%", "//", "&&", "||"};
     static final String[] SINGLE_OPS = {"+", "-", "*", "/", "%", "^", "<", ">", "&", "|", "~", "!", "(", ")", ","};
@@ -123,23 +129,23 @@ public class ExprCompiler{
             if(Character.isDigit(c) || (c == '.' && i+1 < len && Character.isDigit(expr.charAt(i+1)))){
                 int start = i;
                 while(i < len && (Character.isDigit(expr.charAt(i)) || expr.charAt(i) == '.')) i++;
-                tokens.add(new Token(TokType.NUM, expr.substring(start, i)));
+                tokens.add(new Token(TokType.NUM, expr.substring(start, i), start));
                 continue;
             }
             if(Character.isLetter(c) || c == '_' || c == '@'){
                 int start = i;
                 if(c == '@') i++;
                 while(i < len && (Character.isLetterOrDigit(expr.charAt(i)) || expr.charAt(i) == '_')) i++;
-                tokens.add(new Token(TokType.IDENT, expr.substring(start, i)));
+                tokens.add(new Token(TokType.IDENT, expr.substring(start, i), start));
                 continue;
             }
-            if(c == '('){ tokens.add(new Token(TokType.LPAREN, "(")); i++; continue; }
-            if(c == ')'){ tokens.add(new Token(TokType.RPAREN, ")")); i++; continue; }
-            if(c == ','){ tokens.add(new Token(TokType.COMMA, ",")); i++; continue; }
+            if(c == '('){ tokens.add(new Token(TokType.LPAREN, "(", i)); i++; continue; }
+            if(c == ')'){ tokens.add(new Token(TokType.RPAREN, ")", i)); i++; continue; }
+            if(c == ','){ tokens.add(new Token(TokType.COMMA, ",", i)); i++; continue; }
             boolean matched = false;
             for(String op : MULTI_OPS){
                 if(i + op.length() <= len && expr.substring(i, i + op.length()).equals(op)){
-                    tokens.add(new Token(TokType.OP, op));
+                    tokens.add(new Token(TokType.OP, op, i));
                     i += op.length();
                     matched = true;
                     break;
@@ -148,7 +154,7 @@ public class ExprCompiler{
             if(matched) continue;
             for(String op : SINGLE_OPS){
                 if(c == op.charAt(0)){
-                    tokens.add(new Token(TokType.OP, String.valueOf(c)));
+                    tokens.add(new Token(TokType.OP, String.valueOf(c), i));
                     i++;
                     matched = true;
                     break;
@@ -157,7 +163,7 @@ public class ExprCompiler{
             if(matched) continue;
             throw new ParseException("无法识别的字符: " + c + " (位置 " + i + ")");
         }
-        tokens.add(new Token(TokType.EOF, ""));
+        tokens.add(new Token(TokType.EOF, "", i));
         return tokens;
     }
 
