@@ -19,7 +19,7 @@ import java.util.*;
 /**
  * 表达式语句：在逻辑编辑器中以表达式形式显示，保存时自动展开为 op 链。
  *
- * 折叠态：[dest] = [expr text field]
+ * 折叠态：[dest] = [expr Label/TextField 切换显示]
  * 展开态：op cos _ a 0 / op mul _ _ 10 / op add x _ x
  *
  * 关键设计：
@@ -73,8 +73,7 @@ public class ExprStatement extends LStatement{
         table.add(" = ");
 
         // 表达式显示：Label（高亮 + 自动换行）与 TextField（编辑）切换
-        // Label 设置下划线背景（复用 TextField 的 underlineWhite），
-        // 保证非编辑态也有白色横杠，无需外层 wrapper Table
+        // Label 复用 Styles.nodeField 的背景，保证非编辑态也有白色横杠
         Label exprLabel = new Label("");
         Label.LabelStyle labelStyle = new Label.LabelStyle(exprLabel.getStyle());
         if(Styles.nodeField.background != null){
@@ -106,7 +105,9 @@ public class ExprStatement extends LStatement{
         });
 
         // 更新 Label 的高亮文本（错误时用红色）
-        // pack() 强制 Label 在固定宽度下重新 layout，计算 wrap 后的真实高度
+        // 不调用 pack()——pack() 会把宽度设为 getPrefWidth()，而 setWrap(true) 时
+        // getPrefWidth() 返回 0，导致 Label 宽度为 0 无法接收点击。 setText() 已触发
+        // invalidateHierarchy()，Stack 的 layout() 会用正确宽度重新布局。
         Runnable updateLabel = () -> {
             if(hasError[0]){
                 exprLabel.setColor(Color.scarlet);
@@ -114,7 +115,6 @@ public class ExprStatement extends LStatement{
                 exprLabel.setColor(Color.white);
             }
             exprLabel.setText(highlightExpr(expr));
-            exprLabel.pack();
         };
         updateLabel.run();
 
@@ -128,6 +128,7 @@ public class ExprStatement extends LStatement{
         stack.add(exprField);
         table.add(stack).growX().padLeft(4f).fillX();
         exprField.visible = false;
+        exprField.touchable = Touchable.disabled;
 
         // 点击 Label → 进入编辑模式
         exprLabel.addListener(new InputListener(){
@@ -135,7 +136,9 @@ public class ExprStatement extends LStatement{
             public boolean touchDown(InputEvent event, float x, float y, int pointer, KeyCode button){
                 exprField.setText(expr);
                 exprLabel.visible = false;
+                exprLabel.touchable = Touchable.disabled;
                 exprField.visible = true;
+                exprField.touchable = Touchable.enabled;
                 Core.scene.setKeyboardFocus(exprField);
                 Core.scene.setScrollFocus(exprField);
                 return true;
@@ -148,7 +151,9 @@ public class ExprStatement extends LStatement{
             boolean focused = Core.scene.getKeyboardFocus() == exprField;
             if(wasFocused[0] && !focused){
                 exprField.visible = false;
+                exprField.touchable = Touchable.disabled;
                 exprLabel.visible = true;
+                exprLabel.touchable = Touchable.enabled;
                 updateLabel.run();
             }
             wasFocused[0] = focused;

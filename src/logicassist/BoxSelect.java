@@ -33,8 +33,8 @@ import java.util.*;
  * 架构：
  * - 输入层：Core.scene.addCaptureListener 从事件源头拦截，event.stop() 阻止原版 StatementElem
  *   的 InputListener 收到事件。不再需要 restoreChildrenOrder 等对抗代码。
- * - 布局层：拖动期间 relayoutNonSelected 跳过选中积木 + applyInsertShiftViaTranslation
- *   用 translation 腾位（不修改 child.y，避免 layout() 重置导致闪烁）。
+ * - 布局层：移动模式 relayoutNonSelected 紧凑非选中积木 + applyInsertShift
+ *   直接修改 child.y 腾位（JumpCurve 基于 child.y 不含 translation）。
  *   clearDraggingField 防止原版 layout() 跳过错误积木。
  * - 接管按钮：选中积木后劫持其功能按钮（删除→批量删除，+→批量复制，复制→模式切换）。
  *
@@ -531,7 +531,7 @@ public class BoxSelect{
         for(LStatement st : copies){
             st.setupUI();
         }
-        // copy() 用 write→read 序列化，JumpStatement.dest（transient）为 null，
+        // JumpStatement 默认 copy() 用 write→read 序列化，dest（transient）为 null，
         // setupUI() 是空方法不重建。手动从 destIndex 查找 StatementElem 赋值给 dest
         resolveJumpDests(canvas);
 
@@ -586,7 +586,7 @@ public class BoxSelect{
         state = State.IDLE;
     }
 
-    /** 重置所有积木的 translation（applyInsertShiftViaTranslation 可能给非选中积木设了 translation） */
+    /** 重置所有积木的 translation（移动模式下选中积木设了 translation 跟随鼠标） */
     private static void resetAllTranslations(LCanvas canvas){
         for(Element child : canvas.statements.getChildren()){
             child.setTranslation(0, 0);
@@ -646,7 +646,9 @@ public class BoxSelect{
         resetAllTranslations(canvas);
 
         if(state == State.DRAGGING_MOVE){
-            // 移动模式：选中积木用 translation 跟随鼠标
+            // 移动模式：紧凑排列非选中积木，消除选中积木原始位置占用的空间
+            relayoutNonSelected(canvas);
+            // 选中积木用 translation 跟随鼠标
             Vec2 localMouse = canvas.statements.stageToLocalCoordinates(Tmp.v2.set(mx, my));
             float dx = localMouse.x - dragStartLocalX;
             float dy = localMouse.y - dragStartLocalY;
@@ -656,7 +658,7 @@ public class BoxSelect{
         }
         // 复制模式：原积木保持原位，预览由 drawCopyPreview() 绘制
 
-        // 计算插入位置（用原始 child.y，translation 已重置为0）
+        // 计算插入位置（移动模式下用 relayoutNonSelected 后的紧凑位置）
         int newInsertPos = computeInsertPosition(canvas, my);
         if(newInsertPos != dragInsertPos){
             dragInsertPos = newInsertPos;
@@ -714,21 +716,48 @@ public class BoxSelect{
 
     // ===== 腾位 =====
 
+    /** 移动模式：紧凑排列非选中积木，跳过选中积木消除其原始位置占用的空间。
+     *  选中积木仅用 translation 跟随鼠标，child.y 保持 validate 后的位置（不影响视觉）。
+     *  注意：totalHeight 只算非选中积木，否则顶部选中时会出现幽灵空格。 */
+    private static void relayoutNonSelected(LCanvas canvas){
+        Seq<Element> children = canvas.statements.getChildren();
+        float space = Scl.scl(10f);
+        float width = canvas.statements.getWidth();
+
+        // 只计算非选中积木的总高度
+        float totalHeight = 0;
+        for(Element e : children){
+            if(e instanceof StatementElem && selected.contains(e)) continue;
+            totalHeight += e.getPrefHeight() + space;
+        }
+        if(totalHeight > 0) totalHeight -= space;
+
+        // 从顶部开始紧凑排列非选中积木
+        float cy = 0;
+        for(Element e : children){
+            if(e instanceof StatementElem && selected.contains(e)) continue;
+            e.setSize(width, e.getPrefHeight());
+            e.setPosition(0, totalHeight - cy, Align.topLeft);
+            cy += e.getPrefHeight() + space;
+        }
+    }
+
     /** 腾位：将插入点下方的非选中积木向下移，撑开空间显示插入位置。
      *  直接修改 child.y（非 translation），因为 JumpCurve.act 用 localToAscendantCoordinates
-     *  定位时基于 child.y，不含 translation。每帧在 invalidate+validate（compact）后重新应用。
-     *  选中积木在移动模式下用 translation 跟随鼠标，其 child.y 保持 compact 位置。 */
+     *  定位时基于 child.y，不含 translation。每帧在 invalidate+validate+relayoutNonSelected
+     *  后重新应用。选中积木在移动模式下用 translation 跟随鼠标。 */
     private static void applyInsertShift(LCanvas canvas){
         if(dragInsertPos < 0 || selected.isEmpty()) return;
 
         Seq<Element> children = canvas.statements.getChildren();
         float space = Scl.scl(10f);
 
-        // 腾位量 = 所有选中积木高度 + 间距（含首尾各一个 space 作为间隙）
+        // 腾位量 = 所有选中积木高度 + 间距，减去末尾多余的一个间距
         float shiftAmount = 0;
         for(StatementElem elem : selected){
             shiftAmount += elem.getHeight() + space;
         }
+        shiftAmount -= space;
         if(shiftAmount <= 0) return;
 
         if(state == State.DRAGGING_COPY){
@@ -1160,7 +1189,7 @@ public class BoxSelect{
         for(LStatement st : copies){
             st.setupUI();
         }
-        // copy() 用 write→read 序列化，JumpStatement.dest（transient）为 null，
+        // JumpStatement 默认 copy() 用 write→read 序列化，dest（transient）为 null，
         // setupUI() 是空方法不重建。手动从 destIndex 查找 StatementElem 赋值给 dest
         resolveJumpDests(canvas);
 
@@ -1222,7 +1251,7 @@ public class BoxSelect{
     }
 
     /** 从 destIndex 重建 JumpStatement.dest 引用。
-     *  copy() 用 write→read 序列化，dest 是 transient 字段不会被复制，
+     *  JumpStatement 默认 copy() 用 write→read 序列化，dest 是 transient 字段不会被复制，
      *  setupUI() 是空方法不会自动重建。必须手动从 children 列表按 destIndex 查找。 */
     private static void resolveJumpDests(LCanvas canvas){
         Seq<Element> children = canvas.statements.getChildren();
