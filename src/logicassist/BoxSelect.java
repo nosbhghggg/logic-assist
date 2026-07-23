@@ -68,6 +68,21 @@ public class BoxSelect{
     private static final Mat tmpMat = new Mat();
     private static final Mat tmpMat2 = new Mat();
 
+    // ===== 反射字段（包级私有，缓存 Field）=====
+    private static final Field draggingField;
+    private static final Field privilegedField;
+    static{
+        try{
+            draggingField = LCanvas.class.getDeclaredField("dragging");
+            draggingField.setAccessible(true);
+            privilegedField = LCanvas.class.getDeclaredField("privileged");
+            privilegedField.setAccessible(true);
+        }catch(Exception e){
+            Log.err("[LogicAssist] Failed to access LCanvas fields", e);
+            throw new RuntimeException(e);
+        }
+    }
+
     // ===== 状态 =====
     private enum State{
         IDLE, SELECTING, SELECTED, DRAGGING_MOVE, DRAGGING_COPY
@@ -1306,15 +1321,18 @@ public class BoxSelect{
     }
 
     private static boolean isPrivileged(LCanvas canvas){
-        if(canvas instanceof LogicCanvas){
-            return ((LogicCanvas)canvas).isPrivilegedCanvas();
+        try{
+            return privilegedField.getBoolean(canvas);
+        }catch(Exception e){
+            return false;
         }
-        return false;
     }
 
     private static void clearDraggingField(LCanvas canvas){
-        if(canvas instanceof LogicCanvas){
-            ((LogicCanvas)canvas).clearDraggingField();
+        try{
+            draggingField.set(canvas, null);
+        }catch(Exception e){
+            Log.warn("[LogicAssist] Failed to clear dragging field", e);
         }
     }
 }

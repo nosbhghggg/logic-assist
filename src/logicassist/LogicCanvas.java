@@ -1,23 +1,38 @@
-package mindustry.logic;
+package logicassist;
 
 import arc.scene.*;
 import arc.struct.*;
 import arc.util.*;
-import logicassist.*;
 import logicassist.expr.*;
+import mindustry.logic.*;
+
+import java.lang.reflect.*;
 
 /**
  * 夺舍版 LCanvas：继承原版 LCanvas，覆盖关键生命周期方法。
- * 放在 mindustry.logic 包下以直接访问包级字段（dragging, privileged, addressLabel 等）。
  *
- * 核心改进：
- * - 不覆盖 rebuild()，让原版自己创建 DragLayout（避免 159.5/159.6 版本差异导致 statements 未初始化）
- * - load() 完成后立即折叠 op 链为零延迟
- * - save() 保存前先展开所有 ExprStatement，保存纯 mlog 后重新折叠
- * - draw() 中直接更新 addressLabel 为 mlog 行号（同包访问，无需反射）
- * - draw() 内联 JumpLineColor.patchAllCurves，消除独立循环
+ * 由于模组类加载器 ≠ 游戏类加载器，即使放在同包也无法访问包级私有字段。
+ * 因此本类放在 logicassist 包下，仅对必要的包级私有字段使用反射（缓存 Field）。
+ *
+ * 反射字段：
+ * - StatementElem.addressLabel（包级私有）— 用于更新 mlog 行号
+ * - LCanvas.dragging（包级私有）— BoxSelect 清除拖拽状态时访问
+ * - LCanvas.privileged（包级私有）— BoxSelect 检查特权模式时访问
+ *
+ * public 字段直接访问：statements, pane, st
  */
 public class LogicCanvas extends LCanvas{
+
+    private static Field addressLabelField;
+
+    static{
+        try{
+            addressLabelField = LCanvas.StatementElem.class.getDeclaredField("addressLabel");
+            addressLabelField.setAccessible(true);
+        }catch(Exception e){
+            Log.err("[LogicAssist] Failed to access StatementElem.addressLabel", e);
+        }
+    }
 
     public LogicCanvas(){
         super();
@@ -46,22 +61,18 @@ public class LogicCanvas extends LCanvas{
 
     /**
      * 遍历所有积木，将 addressLabel 从 UI 索引更新为 mlog 行号。
-     *
-     * 原版 DragLayout.layout() 每帧设置 addressLabel 为 UI 索引（0,1,2...）。
-     * 这里在 draw() 中覆盖为 mlog 行号，考虑 ExprStatement 展开后的真实行数。
-     * 因为 LogicCanvas 在 mindustry.logic 包下，可直接访问 StatementElem.addressLabel。
+     * 通过反射访问包级私有字段 addressLabel。
      */
     private void updateMlogAddresses(){
-        if(statements == null) return;
+        if(statements == null || addressLabelField == null) return;
         Seq<Element> children = statements.getChildren();
         int mlogLine = 0;
         for(Element child : children){
-            if(!(child instanceof StatementElem)) continue;
-            StatementElem elem = (StatementElem)child;
+            if(!(child instanceof LCanvas.StatementElem)) continue;
+            LCanvas.StatementElem elem = (LCanvas.StatementElem)child;
 
             if(elem.st instanceof ExprStatement){
                 ExprStatement exprStmt = (ExprStatement)elem.st;
-                // 确保 lastOps 已编译（从 Add 菜单新添加的 ExprStatement 可能还没编译）
                 if(exprStmt.lastOps == null){
                     try{
                         exprStmt.lastOps = ExprCompiler.compile(exprStmt.dest, exprStmt.expr);
@@ -71,22 +82,20 @@ public class LogicCanvas extends LCanvas{
                 }
                 int lineCount = (exprStmt.lastOps != null) ? exprStmt.lastOps.size() : 1;
                 int endLine = mlogLine + lineCount - 1;
-                elem.addressLabel.setText(lineCount > 1 ? (mlogLine + "->" + endLine) : (mlogLine + ""));
+                setAddrText(elem, lineCount > 1 ? (mlogLine + "->" + endLine) : (mlogLine + ""));
                 mlogLine += lineCount;
             }else{
-                elem.addressLabel.setText(mlogLine + "");
+                setAddrText(elem, mlogLine + "");
                 mlogLine++;
             }
         }
     }
 
-    // ===== 字段访问器：供 BoxSelect 跨包访问 =====
-
-    public boolean isPrivilegedCanvas(){
-        return privileged;
-    }
-
-    public void clearDraggingField(){
-        dragging = null;
+    private static void setAddrText(LCanvas.StatementElem elem, String text){
+        try{
+            arc.scene.ui.Label label = (arc.scene.ui.Label)addressLabelField.get(elem);
+            if(label != null) label.setText(text);
+        }catch(Exception ignored){
+        }
     }
 }
