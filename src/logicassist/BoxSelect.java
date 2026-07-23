@@ -189,6 +189,17 @@ public class BoxSelect{
             // update() 不会被调用，形成死锁。直接执行 setSize + toFront 即可。
             overlay.setSize(Core.graphics.getWidth(), Core.graphics.getHeight());
             overlay.toFront();
+
+            // 拖拽期间每帧重新计算插入指示器位置（滚轮滚动时 touchDragged 不触发）
+            if(state == State.DRAGGING_MOVE || state == State.DRAGGING_COPY){
+                LCanvas c = getCanvas();
+                if(c != null){
+                    float mx = Core.input.mouseX();
+                    float my = Core.input.mouseY();
+                    updateDrag(c, mx, my);
+                    autoScroll(c);
+                }
+            }
         });
     }
 
