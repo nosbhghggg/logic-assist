@@ -50,6 +50,15 @@ public class ExprStatement extends LStatement{
 
     @Override
     public void build(Table table){
+        // 初始化 lastOps：手动添加的 Expr 可能还没有编译过
+        if(lastOps == null){
+            try{
+                lastOps = ExprCompiler.compile(dest, expr);
+            }catch(Exception e){
+                // 表达式无效，lastOps 保持 null，行号显示为单行
+            }
+        }
+
         table.left();
         // dest 字段
         field(table, dest, str -> dest = str);

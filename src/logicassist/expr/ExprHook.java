@@ -235,6 +235,14 @@ public class ExprHook{
 
             if(elem.st instanceof ExprStatement){
                 ExprStatement exprStmt = (ExprStatement)elem.st;
+                // 确保 lastOps 已编译（从文本加载或手动添加的 Expr 可能还没编译）
+                if(exprStmt.lastOps == null){
+                    try{
+                        exprStmt.lastOps = ExprCompiler.compile(exprStmt.dest, exprStmt.expr);
+                    }catch(Exception e){
+                        // 编译失败，按单行处理
+                    }
+                }
                 int lineCount = (exprStmt.lastOps != null) ? exprStmt.lastOps.size() : 1;
                 int endLine = mlogLine + lineCount - 1;
                 // 多行显示区间，单行显示数字
