@@ -1093,9 +1093,8 @@ public class BoxSelect{
         // 积木总高度不超过可视区域时不绘制彩色滚动条
         if(totalHeight <= pane.getHeight()) return;
 
-        // 绘制每个积木对应的颜色段（用 ScissorStack 裁剪到滚动条可视区域内）
-        Rect clipRect = Tmp.r1.set(scrollbarX, scrollbarBottom, scrollbarW, scrollbarH);
-        ScissorStack.push(clipRect);
+        // 绘制每个积木对应的颜色段，手动裁剪到滚动条可视区域内（不使用 ScissorStack，
+        // 避免与 MindustryX 面板的 ScrollPane scissor 产生交集导致裁剪异常）
         float cy = 0;
         for(Element child : children){
             float elemH = child.getPrefHeight();
@@ -1110,14 +1109,18 @@ public class BoxSelect{
                 }
             }
 
-            Draw.color(c);
-            Draw.alpha(SCROLLBAR_SEG_ALPHA);
-            Fill.crect(scrollbarX, elemTop - elemColorH, scrollbarW, elemColorH);
+            // 手动裁剪到 [scrollbarBottom, scrollbarTop] 范围内
+            float segTop = Math.min(scrollbarTop, elemTop);
+            float segBottom = Math.max(scrollbarBottom, elemTop - elemColorH);
+            if(segTop > segBottom){
+                Draw.color(c);
+                Draw.alpha(SCROLLBAR_SEG_ALPHA);
+                Fill.crect(scrollbarX, segBottom, scrollbarW, segTop - segBottom);
+            }
 
             cy += elemH + space;
         }
         Draw.flush();
-        ScissorStack.pop();
         Draw.reset();
     }
 
@@ -1133,15 +1136,16 @@ public class BoxSelect{
 
     /** 在画布坐标系中绘制插入指示器（在积木下方）。
      *  供 LogicCanvas.draw() 在 super.draw() 之前调用。
-     *  此时 Draw transform 是 LCanvas 的变换，需将 stage 坐标转换为 LCanvas 本地坐标。 */
+     *  indicatorX/Y 是 stage 坐标，直接用 identity 矩阵在 stage 坐标系绘制，
+     *  避免坐标转换错误（localToStageCoordinates 方向反了会导致位置偏移）。 */
     public static void drawInsertIndicatorUnder(LCanvas canvas){
         if(dragInsertPos < 0) return;
-        // indicatorX/Y/W/H 是 stage 坐标，转换为 LCanvas 本地坐标
-        // （Draw transform 是 LCanvas 的变换，本地坐标经变换后映射到正确的 stage 位置）
-        Vec2 local = canvas.localToAscendantCoordinates(null, Tmp.v1.set(indicatorX, indicatorY));
+        Mat oldTrans = tmpMat.set(Draw.trans());
+        Draw.trans(tmpMat2.idt());
         Draw.reset();
-        Tex.pane.draw(local.x, local.y, indicatorW, indicatorH);
+        Tex.pane.draw(indicatorX, indicatorY, indicatorW, indicatorH);
         Draw.reset();
+        Draw.trans(oldTrans);
     }
 
     private static void drawInsertIndicator(LCanvas canvas){
