@@ -64,17 +64,20 @@ tasks.register('jarAndroid'){
         def buildToolsRoot = new File("$sdkRoot/build-tools/").listFiles().sort().reverse().find{ f -> new File(f, "lib/d8.jar").exists() || new File(f, "d8.jar").exists() }
         if(!buildToolsRoot) throw new GradleException("No d8.jar found. Ensure that you have Android build-tools installed.")
 
-        //collect dependencies needed for desugaring
-        def dependencies = (configurations.compileClasspath.asList() + configurations.runtimeClasspath.asList() + [new File(platformRoot, "android.jar")]).collect{ "--classpath \"${it.path}\"" }.join(" ")
-
         // d8.jar 路径（build-tools/xx.x.x/lib/d8.jar 或 build-tools/xx.x.x/d8.jar）
         def d8jar = new File(buildToolsRoot, "lib/d8.jar")
         if(!d8jar.exists()) d8jar = new File(buildToolsRoot, "d8.jar")
-        def java = System.getProperty("java.home") + "/bin/java"
+        def javaExec = System.getProperty("java.home") + "/bin/java"
 
-        //dex and desugar files - 直接用 java -cp 调用 D8，避免 d8.bat 的环境问题
-        "\"$java\" -cp \"${d8jar.path}\" com.android.tools.r8.D8 $dependencies --min-api 14 --output ${projectName}Android.jar ${projectName}Desktop.jar"
-                .execute(null, new File("build/libs")).waitForProcessOutput(System.out, System.err)
+        //collect dependencies needed for desugaring
+        def classpathFiles = configurations.compileClasspath.asList() + configurations.runtimeClasspath.asList() + [new File(platformRoot, "android.jar")]
+
+        // 用命令数组执行，避免 String.execute() 在 Linux 上不解析引号的问题
+        def cmd = [javaExec, "-cp", d8jar.path, "com.android.tools.r8.D8"]
+        classpathFiles.each{ cmd.addAll(["--classpath", it.path]) }
+        cmd.addAll(["--min-api", "14", "--output", "${projectName}Android.jar", "${projectName}Desktop.jar"])
+
+        cmd.execute(null, new File("build/libs")).waitForProcessOutput(System.out, System.err)
     }
 }
 
