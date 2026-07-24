@@ -20,7 +20,7 @@ import java.util.*;
  * 致谢 / Acknowledgements
  * ------------------------------------------------------------
  * 反编译（op 链 → 表达式）思路参考了 mindcode 项目的 MlogDecompiler：
- *   - 项目地址: https://github.com/PizzaNX/mindcode
+ *   - 项目地址: https://github.com/cardillan/mindcode
  *   - 参考文件: compiler/src/main/java/info/teksol/mc/mindcode/decompiler/MlogDecompiler.java
  *   - 参考内容: collapseExpressions() 用变量定义表跟踪临时变量，
  *     将后续引用替换为 OperationExpression 子树；与本项目 rebuild()

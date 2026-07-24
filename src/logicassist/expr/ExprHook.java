@@ -26,7 +26,7 @@ import java.util.*;
  * 致谢 / Acknowledgements
  * ------------------------------------------------------------
  * op 链折叠（foldAll）思路参考了 mindcode 项目的 MlogDecompiler：
- *   - 项目地址: https://github.com/PizzaNX/mindcode
+ *   - 项目地址: https://github.com/cardillan/mindcode
  *   - 参考文件: compiler/src/main/java/info/teksol/mc/mindcode/decompiler/MlogDecompiler.java
  *   - 参考内容: collapseExpressions() 检测线性指令块并折叠为表达式子树，
  *     用 isLinear() 判断指令是否可参与折叠（非 jump、非 @counter 赋值）。

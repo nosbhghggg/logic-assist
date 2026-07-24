@@ -57,8 +57,8 @@ op add x _0 x
 
 ## Acknowledgements
 
-- [MI2-utilities](https://github.com/anomaly-251/MI2-Utilities-Java) — drag-move and jump-index translation logic
-- [mindcode](https://github.com/PizzaNX/mindcode) — op-chain decompilation, operator classification, optimization rules
+- [MI2-utilities](https://github.com/BlackDeluxeCat/MI2-Utilities-Java) — drag-move and jump-index translation logic
+- [mindcode](https://github.com/cardillan/mindcode) — op-chain decompilation, operator classification, optimization rules
 
 ## Build
 

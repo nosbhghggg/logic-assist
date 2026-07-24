@@ -51,7 +51,7 @@ import java.util.*;
  * 致谢 / Acknowledgements
  * ------------------------------------------------------------
  * 拖动移动和跳转索引转换逻辑参考了 MI2-Utilities 项目：
- *   - 项目地址: https://github.com/anomaly-251/MI2-Utilities-Java
+ *   - 项目地址: https://github.com/BlackDeluxeCat/MI2-Utilities-Java
  *   - 参考文件: src/mi2u/ui/LogicHelperMindow.java
  */
 public class BoxSelect{

@@ -57,8 +57,8 @@ op add x _0 x
 
 ## 致谢
 
-- [MI2-utilities](https://github.com/anomaly-251/MI2-Utilities-Java) —— 拖动移动和跳转索引转换逻辑
-- [mindcode](https://github.com/PizzaNX/mindcode) —— op 链反编译、运算符分类、优化规则
+- [MI2-utilities](https://github.com/BlackDeluxeCat/MI2-Utilities-Java) —— 拖动移动和跳转索引转换逻辑
+- [mindcode](https://github.com/cardillan/mindcode) —— op 链反编译、运算符分类、优化规则
 
 ## 编译
 
