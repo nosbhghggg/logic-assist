@@ -1,0 +1,33 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          java-version: '17'
+          distribution: 'temurin'
+      - uses: android-actions/setup-android@v3
+      - name: Build universal JAR
+        run: ./gradlew deploy
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: build/libs/logic-assist.jar
+          name: ${{ github.ref_name }} - Universal Release
+          body: |
+            Universal JAR for desktop and Android.
+
+            **Features:**
+            - Jump line coloring
+            - Box select (copy/move)
+            - Expression compiler
+            - Scrollbar click-to-jump
+            - Bilingual (EN/zh_CN)
