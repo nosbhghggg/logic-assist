@@ -19,7 +19,7 @@ import java.util.*;
 /**
  * 表达式语句：在逻辑编辑器中以表达式形式显示，保存时自动展开为 op 链。
  *
- * 折叠态：[dest] = [expr Label/TextField 切换显示]
+ * 折叠态：[dest] = [expr Label 覆盖 TextField，点击 Label 切换编辑]
  * 展开态：op cos _0 a 0 / op mul _0 _0 10 / op add x _0 x
  *
  * 关键设计：
@@ -152,6 +152,7 @@ public class ExprStatement extends LStatement{
         stack.add(exprLabel);
         stack.add(exprField);
         table.add(stack).growX().padLeft(4f).fillX();
+        // TextField 默认隐藏：不参与 Stack 高度计算，Label 换行高度自然撑开 Stack
         exprField.visible = false;
         exprField.touchable = Touchable.disabled;
 
@@ -159,10 +160,25 @@ public class ExprStatement extends LStatement{
         table.row();
         table.add(errorLabel).growX().padLeft(4f).padTop(2f).colspan(3);
 
-        // 点击 Label → 进入编辑模式
+        // 点击 Label → 编辑表达式
+        // 移动端：直接弹出原生输入对话框（TextField 被隐藏，其 touchDown 不会触发，
+        //         导致 setOnscreenKeyboardVisible 不被调用，焦点立即丢失）
+        // 桌面端：切换 Label/TextField 可见性，设置焦点进行内联编辑
         exprLabel.addListener(new InputListener(){
             @Override
             public boolean touchDown(InputEvent event, float x, float y, int pointer, KeyCode button){
+                if(Core.app.isMobile() && !Core.input.useKeyboard()){
+                    Input.TextInput input = new Input.TextInput();
+                    input.text = expr;
+                    input.accepted = text -> {
+                        expr = text;
+                        exprField.setText(text);
+                        exprField.change();
+                    };
+                    Core.input.getTextInput(input);
+                    event.stop();
+                    return true;
+                }
                 exprField.setText(expr);
                 exprLabel.visible = false;
                 exprLabel.touchable = Touchable.disabled;
@@ -170,11 +186,12 @@ public class ExprStatement extends LStatement{
                 exprField.touchable = Touchable.enabled;
                 Core.scene.setKeyboardFocus(exprField);
                 Core.scene.setScrollFocus(exprField);
+                event.stop();
                 return true;
             }
         });
 
-        // 失焦检测：用 update 轮询焦点，切回 Label 显示
+        // 失焦检测：TextField 失焦时切回 Label 显示
         final boolean[] wasFocused = {false};
         exprField.update(() -> {
             boolean focused = Core.scene.getKeyboardFocus() == exprField;

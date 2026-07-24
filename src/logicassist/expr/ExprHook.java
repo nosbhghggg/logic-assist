@@ -156,11 +156,9 @@ public class ExprHook{
             try{
                 ops = ExprCompiler.compile(exprStmt.dest, exprStmt.expr);
             }catch(Exception e){
-                ops = exprStmt.lastOps;
-                if(ops == null || ops.isEmpty()){
-                    Log.warn("[LogicAssist] Failed to unfold expression: @", exprStmt.expr);
-                    continue;
-                }
+                // 编译失败：保留 ExprStatement 不展开，write() 会输出 lastOps
+                // 避免 unfold→fold 循环用 lastOps 重建 ExprStatement 覆盖错误的 expr
+                continue;
             }
 
             int chainLen = ops.size();
