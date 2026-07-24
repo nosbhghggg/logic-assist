@@ -1,19 +1,19 @@
 package logicassist.expr;
 
+import arc.Core;
 import java.util.*;
 
 /**
  * 表达式编译器：表达式字符串 ↔ op 语句链双向转换。
  *
  * 正向：x = cos(a) * 10 + x →
- *   op cos _ a 0
- *   op mul _ _ 10
- *   op add x _ x
+ *   op cos _0 a 0
+ *   op mul _0 _0 10
+ *   op add x _0 x
  *
  * 逆向：上述 op 链 → cos(a) * 10 + x
  *
- * 临时变量策略：使用 _ 作为主临时变量，通过栈式分配复用。
- * 当两个子表达式都复杂时，使用 _1, _2 等编号临时变量。
+ * 临时变量策略：统一使用 _0, _1, _2 ... 编号命名，通过栈式分配复用。
  * 每个临时变量写入一次、读取一次，形成线性链，以支持逆向重建。
  *
  * ------------------------------------------------------------
@@ -175,7 +175,7 @@ public class ExprCompiler{
                 }
             }
             if(matched) continue;
-            throw new ParseException("无法识别的字符: " + c + " (位置 " + i + ")");
+            throw new ParseException(msg("la.err.unrecognized_char", c, i));
         }
         tokens.add(new Token(TokType.EOF, "", i));
         return tokens;
@@ -196,7 +196,7 @@ public class ExprCompiler{
         Node parse(){
             Node node = parseExpr();
             if(peek().type != TokType.EOF)
-                throw new ParseException("意外的 token: " + peek().text);
+                throw new ParseException(msg("la.err.unexpected_token", peek().text));
             return node;
         }
 
@@ -310,7 +310,7 @@ public class ExprCompiler{
                 next();
                 Node inner = parseExpr();
                 if(peek().type != TokType.RPAREN)
-                    throw new ParseException("期望 ')'");
+                    throw new ParseException(msg("la.err.expected_rparen"));
                 next();
                 return inner;
             }
@@ -328,24 +328,24 @@ public class ExprCompiler{
                         }
                     }
                     if(peek().type != TokType.RPAREN)
-                        throw new ParseException("期望 ')' 结束函数调用");
+                        throw new ParseException(msg("la.err.expected_rparen_func"));
                     next();
                     String funcName = resolveFuncName(name);
                     if(funcName == null)
-                        throw new ParseException("未知函数: " + name);
+                        throw new ParseException(msg("la.err.unknown_func", name));
                     if(UNARY_OPS.contains(funcName)){
-                        if(args.size() != 1) throw new ParseException(funcName + " 需要1个参数");
+                        if(args.size() != 1) throw new ParseException(msg("la.err.requires_1_arg", funcName));
                         return new Unary(funcName, args.get(0));
                     }
                     if(FUNC_BINARY_OPS.contains(funcName)){
-                        if(args.size() != 2) throw new ParseException(funcName + " 需要2个参数");
+                        if(args.size() != 2) throw new ParseException(msg("la.err.requires_2_args", funcName));
                         return new Binary(funcName, args.get(0), args.get(1));
                     }
-                    throw new ParseException("未知函数: " + name);
+                    throw new ParseException(msg("la.err.unknown_func", name));
                 }
                 return new Var(name);
             }
-            throw new ParseException("意外的 token: " + tok.text);
+            throw new ParseException(msg("la.err.unexpected_token", tok.text));
         }
 
         static String resolveFuncName(String name){
@@ -365,9 +365,7 @@ public class ExprCompiler{
             for(String op : operands){
                 if(isTemp(op)) return op;
             }
-            String temp = counter == 0 ? TMP : TMP + counter;
-            counter++;
-            return temp;
+            return TMP + counter++;
         }
     }
 
@@ -427,7 +425,7 @@ public class ExprCompiler{
             return temp;
         }
 
-        throw new ParseException("未知节点类型");
+        throw new ParseException(msg("la.err.unknown_node"));
     }
 
     // ===== 逆向重建：op 链 → 表达式 =====
@@ -551,15 +549,20 @@ public class ExprCompiler{
             return left + sym + right;
         }
 
-        throw new ParseException("未知节点类型");
+        throw new ParseException(msg("la.err.unknown_node"));
     }
 
     // ===== 工具方法 =====
 
-    /** 判断变量名是否为临时变量（_ 或 _1, _2 ...） */
+    /** 从 bundle 获取本地化消息，找不到时返回 key 本身（开发提醒） */
+    private static String msg(String key, Object... args){
+        if(Core.bundle == null || !Core.bundle.has(key)) return key;
+        return args.length == 0 ? Core.bundle.get(key) : Core.bundle.format(key, args);
+    }
+
+    /** 判断变量名是否为临时变量（_0, _1, _2 ... 格式，_ 后必须跟数字） */
     public static boolean isTemp(String name){
-        if(name == null || !name.startsWith(TMP)) return false;
-        if(name.equals(TMP)) return true;
+        if(name == null || name.length() < 2 || !name.startsWith(TMP)) return false;
         for(int i = 1; i < name.length(); i++){
             if(!Character.isDigit(name.charAt(i))) return false;
         }

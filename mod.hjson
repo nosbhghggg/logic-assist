@@ -1,28 +1,11 @@
-// Logic Assist - 逻辑编辑器辅助模组
-// 为 logic 编辑器提供跳转线着色、框选等增强功能
-
 displayName: "Logic Assist"
-
-// 内部名称（小写+连字符）
 name: "logic-assist"
-
 author: "VT4JIGMQG"
-
-// Java 主类的完全限定名
 main: "logicassist.LogicAssistMod"
-
 description: "Logic editor enhancements: jump line coloring, box select, and more."
 subtitle: "Logic editor power tools"
-
 version: "1.0.0"
-
 minGameVersion: "159"
-
-// Java 模组标记
 java: true
-
-// 多人联机兼容（客户端 UI 模组，不影响游戏逻辑）
 hidden: true
-
-// 允许模组浏览器收录
 hideBrowser: false

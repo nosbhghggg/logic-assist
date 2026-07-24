@@ -128,8 +128,9 @@ public class BoxSelect{
     private static boolean initialized = false;
     private static InputListener captureListener;
 
-    // 反射缓存（vScrollBounds）
+    // 反射缓存（vScrollBounds / vKnobBounds）
     private static Field vScrollBoundsField;
+    private static Field vKnobBoundsField;
 
     // ===== 初始化 =====
 
@@ -344,12 +345,12 @@ public class BoxSelect{
             return false;
         }
 
-        // 点击在滚动条区域时放行给原版处理（滚动条在 ScrollPane 右侧）
+        // 滚动条点击跳转：点击轨道（非滑块）时直接跳转到对应位置，点击滑块放行给原版拖拽
         if(canvas.pane != null && canvas.pane.hasScroll()){
             float paneX = canvas.pane.x;
             float paneW = canvas.pane.getWidth();
             if(stageCoords.x > paneX + paneW - SCROLLBAR_WIDTH){
-                return false;
+                return handleScrollbarClick(canvas.pane, stageCoords.x, stageCoords.y);
             }
         }
 
@@ -938,6 +939,47 @@ public class BoxSelect{
             canvas.pane.setScrollY(canvas.pane.getScrollY() + speed);
         }else if(mouseY > screenH - margin){
             canvas.pane.setScrollY(canvas.pane.getScrollY() - speed);
+        }
+    }
+
+    /** 处理滚动条点击：点击滑块放行给原版拖拽，点击轨道跳转到对应位置 */
+    private static boolean handleScrollbarClick(ScrollPane pane, float stageX, float stageY){
+        try{
+            if(vScrollBoundsField == null){
+                vScrollBoundsField = ScrollPane.class.getDeclaredField("vScrollBounds");
+                vScrollBoundsField.setAccessible(true);
+            }
+            if(vKnobBoundsField == null){
+                vKnobBoundsField = ScrollPane.class.getDeclaredField("vKnobBounds");
+                vKnobBoundsField.setAccessible(true);
+            }
+            Rect vScrollBounds = (Rect)vScrollBoundsField.get(pane);
+            Rect vKnobBounds = (Rect)vKnobBoundsField.get(pane);
+            if(vScrollBounds == null || vScrollBounds.width <= 0 || vScrollBounds.height <= 0) return false;
+
+            Vec2 local = pane.stageToLocalCoordinates(Tmp.v1.set(stageX, stageY));
+
+            // 点击在滑块上 → 放行给原版拖拽
+            if(vKnobBounds != null && vKnobBounds.width > 0 && vKnobBounds.height > 0 &&
+               local.x >= vKnobBounds.x && local.x <= vKnobBounds.x + vKnobBounds.width &&
+               local.y >= vKnobBounds.y && local.y <= vKnobBounds.y + vKnobBounds.height){
+                return false;
+            }
+
+            // 点击在轨道上（非滑块）→ 跳转到对应位置
+            float scrollHeight = pane.getScrollHeight();
+            float visibleHeight = pane.getHeight();
+            float maxScroll = scrollHeight - visibleHeight;
+            if(maxScroll <= 0) return false;
+
+            // Y 轴向上：轨道顶部对应 scrollY=0，底部对应 scrollY=maxScroll
+            float ratio = (vScrollBounds.y + vScrollBounds.height - local.y) / vScrollBounds.height;
+            ratio = Mathf.clamp(ratio, 0f, 1f);
+
+            pane.setScrollY(ratio * maxScroll);
+            return true;
+        }catch(Exception e){
+            return false;
         }
     }
 

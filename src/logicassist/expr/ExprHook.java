@@ -116,6 +116,11 @@ public class ExprHook{
                     adjustJumpIndices(canvas, i + chainLen - 1, -(chainLen - 1));
 
                     changed = true;
+                }else{
+                    // rebuild 失败（如链不完整），跳过整条链，
+                    // 避免 i++ 后从链中间重新查找子链导致误折叠
+                    i = j;
+                    continue;
                 }
             }
             i++;

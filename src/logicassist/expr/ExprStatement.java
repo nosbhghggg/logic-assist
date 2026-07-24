@@ -20,7 +20,7 @@ import java.util.*;
  * 表达式语句：在逻辑编辑器中以表达式形式显示，保存时自动展开为 op 链。
  *
  * 折叠态：[dest] = [expr Label/TextField 切换显示]
- * 展开态：op cos _ a 0 / op mul _ _ 10 / op add x _ x
+ * 展开态：op cos _0 a 0 / op mul _0 _0 10 / op add x _0 x
  *
  * 关键设计：
  * - write() 输出 op 链文本，保证保存的代码始终是标准 mlog
@@ -36,6 +36,9 @@ public class ExprStatement extends LStatement{
 
     /** 上次编译的 op 链（用于 fallback、行号计算和调试） */
     public transient List<ExprCompiler.OpLine> lastOps;
+
+    /** 上次编译的错误消息（null = 无错误）。作为字段保持，避免 build() 重建时丢失错误状态 */
+    public transient String lastError = null;
 
     @Override
     public void write(StringBuilder builder){
@@ -58,12 +61,22 @@ public class ExprStatement extends LStatement{
 
     @Override
     public void build(Table table){
+        // 重新验证：lastError 不为 null 时，expr 可能已被外部修正（如 foldAll），需重新编译检查
+        if(lastError != null){
+            try{
+                ExprCompiler.compile(dest, expr);
+                lastError = null;
+            }catch(Exception e){
+                lastError = e.getMessage();
+            }
+        }
+
         // 初始化 lastOps：手动添加的 Expr 可能还没有编译过
         if(lastOps == null){
             try{
                 lastOps = ExprCompiler.compile(dest, expr);
             }catch(Exception e){
-                // 表达式无效，lastOps 保持 null，行号显示为单行
+                lastError = e.getMessage();
             }
         }
 
@@ -84,8 +97,32 @@ public class ExprStatement extends LStatement{
         exprLabel.setAlignment(Align.left);
         exprLabel.touchable = Touchable.enabled;
 
-        // 语法错误状态：错误时 Label 文字变红
-        final boolean[] hasError = {false};
+        // 错误信息 Label：显示在表达式下方，仅错误时可见
+        Label errorLabel = new Label("");
+        errorLabel.setStyle(new Label.LabelStyle(Styles.outlineLabel));
+        errorLabel.setColor(Color.scarlet);
+        errorLabel.setWrap(true);
+        errorLabel.setAlignment(Align.left);
+        errorLabel.visible = false;
+
+        // 更新 Label 的高亮文本与错误提示
+        // 不调用 pack()——pack() 会把宽度设为 getPrefWidth()，而 setWrap(true) 时
+        // getPrefWidth() 返回 0，导致 Label 宽度为 0 无法接收点击。 setText() 已触发
+        // invalidateHierarchy()，Stack 的 layout() 会用正确宽度重新布局。
+        Runnable updateLabel = () -> {
+            if(lastError != null){
+                exprLabel.setColor(Color.scarlet);
+                // 转义 [ ] 防止富文本解析错误
+                String safe = lastError.replace("[", "[[").replace("]", "]]");
+                errorLabel.setText("[#ff5555]" + safe);
+                errorLabel.visible = true;
+            }else{
+                exprLabel.setColor(Color.white);
+                errorLabel.visible = false;
+            }
+            exprLabel.setText(highlightExpr(expr));
+        };
+        updateLabel.run();
 
         TextField exprField = new TextField(expr);
         exprField.setStyle(Styles.nodeField);
@@ -97,26 +134,14 @@ public class ExprStatement extends LStatement{
             expr = exprField.getText();
             try{
                 lastOps = ExprCompiler.compile(dest, expr);
-                hasError[0] = false;
+                lastError = null;
             }catch(Exception e){
-                // 输入中的语法错误，保留旧 lastOps，标记错误状态
-                hasError[0] = true;
+                // 输入中的语法错误，保留旧 lastOps，记录错误消息
+                lastError = e.getMessage();
             }
+            // 编辑中实时更新错误提示
+            updateLabel.run();
         });
-
-        // 更新 Label 的高亮文本（错误时用红色）
-        // 不调用 pack()——pack() 会把宽度设为 getPrefWidth()，而 setWrap(true) 时
-        // getPrefWidth() 返回 0，导致 Label 宽度为 0 无法接收点击。 setText() 已触发
-        // invalidateHierarchy()，Stack 的 layout() 会用正确宽度重新布局。
-        Runnable updateLabel = () -> {
-            if(hasError[0]){
-                exprLabel.setColor(Color.scarlet);
-            }else{
-                exprLabel.setColor(Color.white);
-            }
-            exprLabel.setText(highlightExpr(expr));
-        };
-        updateLabel.run();
 
         // Stack 叠放 Label 和 TextField，占同一空间
         // 覆盖 getPrefWidth() 返回 0，让外层 cell 不被 Stack 的 prefWidth 撑开
@@ -129,6 +154,10 @@ public class ExprStatement extends LStatement{
         table.add(stack).growX().padLeft(4f).fillX();
         exprField.visible = false;
         exprField.touchable = Touchable.disabled;
+
+        // 错误信息行：占满整行（合并上方 3 列），visible=false 时不占高度
+        table.row();
+        table.add(errorLabel).growX().padLeft(4f).padTop(2f).colspan(3);
 
         // 点击 Label → 进入编辑模式
         exprLabel.addListener(new InputListener(){
