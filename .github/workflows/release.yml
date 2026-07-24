@@ -15,8 +15,10 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
       - uses: android-actions/setup-android@v3
+      - name: Install Android SDK components
+        run: sdkmanager --install "platforms;android-34" "build-tools;34.0.0"
       - name: Build universal JAR
-        run: chmod +x gradlew && ./gradlew deploy
+        run: chmod +x gradlew && ./gradlew deploy --stacktrace
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
