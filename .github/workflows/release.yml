@@ -26,12 +26,4 @@ jobs:
         with:
           files: build/libs/logic-assist.jar
           name: ${{ github.ref_name }} - Universal Release
-          body: |
-            Universal JAR for desktop and Android.
-
-            **Features:**
-            - Jump line coloring
-            - Box select (copy/move)
-            - Expression compiler
-            - Scrollbar click-to-jump
-            - Bilingual (EN/zh_CN)
+          body: Universal JAR for desktop and Android.
