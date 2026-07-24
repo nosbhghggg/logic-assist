@@ -36,8 +36,18 @@ jobs:
             echo "No existing release"
           fi
       - name: Create release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: build/libs/logic-assist.jar
-          name: ${{ github.ref_name }} - Universal Release
-          body: Universal JAR for desktop and Android.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          response=$(curl -s -X POST -H "Authorization: token $GH_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "{\"tag_name\":\"${{ github.ref_name }}\",\"name\":\"${{ github.ref_name }} - Universal Release\",\"body\":\"Universal JAR for desktop and Android.\",\"draft\":false,\"prerelease\":false}" \
+            "https://api.github.com/repos/${{ github.repository }}/releases")
+          upload_url=$(echo "$response" | jq -r '.upload_url' | sed 's/{?name,label}//')
+          release_id=$(echo "$response" | jq -r '.id')
+          echo "Created release $release_id"
+          curl -s -X POST -H "Authorization: token $GH_TOKEN" \
+            -H "Content-Type: application/java-archive" \
+            --data-binary @build/libs/logic-assist.jar \
+            "${upload_url}?name=logic-assist.jar"
+          echo "Uploaded asset"
