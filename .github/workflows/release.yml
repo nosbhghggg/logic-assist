@@ -17,8 +17,22 @@ jobs:
       - uses: android-actions/setup-android@v3
       - name: Install Android SDK components
         run: sdkmanager --install "platforms;android-34" "build-tools;34.0.0"
-      - name: Build universal JAR
-        run: chmod +x gradlew && ./gradlew deploy --stacktrace
+      - name: Diagnostics
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "Java: $(java -version 2>&1)"
+          ls -la $ANDROID_HOME/platforms/ 2>/dev/null || echo "No platforms dir"
+          ls -la $ANDROID_HOME/build-tools/ 2>/dev/null || echo "No build-tools dir"
+      - name: Compile Java
+        run: chmod +x gradlew && ./gradlew compileJava --stacktrace
+      - name: Build desktop JAR
+        run: ./gradlew jar --stacktrace
+      - name: Build Android JAR
+        run: ./gradlew jarAndroid --stacktrace
+      - name: Assemble universal JAR
+        run: ./gradlew deploy --stacktrace
+      - name: Verify output
+        run: ls -la build/libs/
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
