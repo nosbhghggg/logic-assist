@@ -16,7 +16,7 @@ jobs:
           distribution: 'temurin'
       - uses: android-actions/setup-android@v3
       - name: Build universal JAR
-        run: ./gradlew deploy
+        run: chmod +x gradlew && ./gradlew deploy
       - name: Create release
         uses: softprops/action-gh-release@v2
         with:
