@@ -186,10 +186,17 @@ public class JumpLineColor{
                 table.checkPref(SETTING_BLOCKCOLOR, true, b -> {});
                 table.checkPref(SETTING_SCROLLBAR, true, b -> {});
 
-                // 反馈按钮：跳转到 GitHub Issues 页面
-                table.button("@la.feedback", Icon.github, () ->
-                    Core.app.openURI("https://github.com/nosbhghggg/logic-assist/issues")
-                ).growX().height(50f).padTop(12f).row();
+                // 反馈按钮：通过 Setting 机制添加，确保 MindustryX 的 build() 重建后仍然存在
+                // MindustryX 的 SettingsTable.build() 会 clearChildren() 后只按 list 重建，
+                // 直接 table.button() 添加的元素会被清除
+                table.pref(new SettingsMenuDialog.SettingsTable.Setting("la-feedback"){
+                    @Override
+                    public void add(SettingsMenuDialog.SettingsTable t){
+                        t.button("@la.feedback", Icon.github, () ->
+                            Core.app.openURI("https://github.com/nosbhghggg/logic-assist/issues")
+                        ).growX().height(50f).padTop(12f).row();
+                    }
+                });
             });
         }catch(Exception e){
             Log.warn("[LogicAssist] Failed to setup settings: " + e);
