@@ -481,84 +481,63 @@ public class ExprCompiler{
 
     // 将一条 op 转为 AST 节点，包含简化规则
     static Node opToNode(OpLine op){
-        // 加法简化（参考 mindcode ExpressionOptimizer 常量折叠）
-        // add x a 0 → a
+        // 解码简化：以下规则处理原版编码方式（赋值、取反、逻辑非），属于解码而非优化
+        // add x a 0 → a（原版赋值：op add dest src 0）
         if(op.op.equals("add") && op.b.equals("0")) return operandToNode(op.a);
         // add x 0 a → a（交换律）
         if(op.op.equals("add") && op.a.equals("0")) return operandToNode(op.b);
-        // add x a a → a * 2（相同操作数合并）
-        if(op.op.equals("add") && op.a.equals(op.b)){
-            return new Binary("mul", operandToNode(op.a), new Num(2));
-        }
 
-        // 减法简化
-        // sub x 0 a → -a
+        // sub x 0 a → -a（原版取反）
         if(op.op.equals("sub") && op.a.equals("0")) return new Unary("neg", operandToNode(op.b));
-        // sub x a a → 0（相同操作数相减）
-        if(op.op.equals("sub") && op.a.equals(op.b)) return new Num(0);
 
-        // 乘法简化
-        // mul x a 1 → a
+        // mul x a 1 → a（原版乘1赋值）
         if(op.op.equals("mul") && op.b.equals("1")) return operandToNode(op.a);
         // mul x 1 a → a（交换律）
         if(op.op.equals("mul") && op.a.equals("1")) return operandToNode(op.b);
-        // mul x a 0 → 0（任何数乘以0等于0）
+        // mul x a 0 → 0
         if(op.op.equals("mul") && op.b.equals("0")) return new Num(0);
         // mul x 0 a → 0
         if(op.op.equals("mul") && op.a.equals("0")) return new Num(0);
 
-        // 除法简化
         // div x a 1 → a
         if(op.op.equals("div") && op.b.equals("1")) return operandToNode(op.a);
-        // div x a a → 1（相同操作数相除，假设 a != 0）
-        if(op.op.equals("div") && op.a.equals(op.b) && !op.a.equals("0")) return new Num(1);
 
-        // 取模简化
         // mod x a 1 → 0
         if(op.op.equals("mod") && op.b.equals("1")) return new Num(0);
-        // mod x a a → 0（相同操作数取模）
-        if(op.op.equals("mod") && op.a.equals(op.b) && !op.a.equals("0")) return new Num(0);
 
-        // 幂运算简化
-        // pow x a 0 → 1（任何数的0次方等于1）
+        // pow x a 0 → 1
         if(op.op.equals("pow") && op.b.equals("0")) return new Num(1);
-        // pow x a 1 → a（任何数的1次方等于自身）
+        // pow x a 1 → a
         if(op.op.equals("pow") && op.b.equals("1")) return operandToNode(op.a);
-        // pow x a 2 → a ^ 2（保持不变，但确保走标准路径）
-        // pow x 0 a → 0（0的任何正数次方等于0）
+        // pow x 0 a → 0
         if(op.op.equals("pow") && op.a.equals("0")) return new Num(0);
-        // pow x 1 a → 1（1的任何次方等于1）
+        // pow x 1 a → 1
         if(op.op.equals("pow") && op.a.equals("1")) return new Num(1);
 
-        // 逻辑运算简化（参考 mindcode 布尔优化）
-        // equal x a 0 → !a（逻辑非）
+        // equal x a 0 → !a（原版逻辑非：op equal dest src 0）
         if(op.op.equals("equal") && op.b.equals("0")) return new Unary("lnot", operandToNode(op.a));
         // equal x 0 a → !a（交换律）
         if(op.op.equals("equal") && op.a.equals("0")) return new Unary("lnot", operandToNode(op.b));
-        // equal x a a → true（相同操作数相等）
-        if(op.op.equals("equal") && op.a.equals(op.b)) return new Num(1);
-        // notEqual x a a → false
-        if(op.op.equals("notEqual") && op.a.equals(op.b)) return new Num(0);
 
-        // land x a 0 → false（a && false = false）
+        // land x a 0 → false
         if(op.op.equals("land") && op.b.equals("0")) return new Num(0);
         // land x 0 a → false
         if(op.op.equals("land") && op.a.equals("0")) return new Num(0);
-        // land x a 1 → a（a && true = a）
+        // land x a 1 → a
         if(op.op.equals("land") && op.b.equals("1")) return operandToNode(op.a);
         // land x 1 a → a
         if(op.op.equals("land") && op.a.equals("1")) return operandToNode(op.b);
 
-        // or x a 0 → a（a || false = a）
+        // or x a 0 → a
         if(op.op.equals("or") && op.b.equals("0")) return operandToNode(op.a);
         // or x 0 a → a
         if(op.op.equals("or") && op.a.equals("0")) return operandToNode(op.b);
-        // or x a 1 → true（a || true = true）
+        // or x a 1 → true
         if(op.op.equals("or") && op.b.equals("1")) return new Num(1);
         // or x 1 a → true
         if(op.op.equals("or") && op.a.equals("1")) return new Num(1);
 
-        // and x a 0 → 0（a & 0 = 0，位与）
+        // and x a 0 → 0
         if(op.op.equals("and") && (op.a.equals("0") || op.b.equals("0"))) return new Num(0);
 
         // 一元运算符
@@ -602,6 +581,8 @@ public class ExprCompiler{
                 case "add":
                     if(isZero(r)) return l;
                     if(isZero(l)) return r;
+                    // a + a = a * 2
+                    if(nodesEqual(l, r)) return optimize(new Binary("mul", l, new Num(2)));
                     // a + (-b) = a - b
                     if(r instanceof Unary && ((Unary)r).op.equals("neg"))
                         return optimize(new Binary("sub", l, ((Unary)r).operand));
