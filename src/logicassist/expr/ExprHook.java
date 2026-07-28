@@ -15,22 +15,12 @@ import java.util.*;
 /**
  * 表达式集成钩子：提供 op 链 ↔ 表达式的双向转换。
  *
- * 集成后：
- * - foldAll() 由 LogicCanvas.load() 直接调用，零延迟
- * - save() 由 LogicCanvas.save() 调用：unfoldAll → super.save → foldAll
- * - 行号由 LogicCanvas.act() 更新
- * - LogicIO.allStatements 是 public static 字段，直接访问无需反射
- * - updateJumpHeights 是 DragLayout 的 public 字段，直接访问
+ * foldAll() 由 LogicCanvas.load() 调用，save() 由 LogicCanvas.save() 调用
+ * （unfoldAll → super.save → foldAll）。
  *
- * ------------------------------------------------------------
- * 致谢 / Acknowledgements
- * ------------------------------------------------------------
- * op 链折叠（foldAll）思路参考了 mindcode 项目的 MlogDecompiler：
- *   - 项目地址: https://github.com/cardillan/mindcode
- *   - 参考文件: compiler/src/main/java/info/teksol/mc/mindcode/decompiler/MlogDecompiler.java
- *   - 参考内容: collapseExpressions() 检测线性指令块并折叠为表达式子树，
- *     用 isLinear() 判断指令是否可参与折叠（非 jump、非 @counter 赋值）。
- *     本项目用 hasJumpInRange() 实现等价的跳转安全检查。
+ * 致谢：mindcode (https://github.com/cardillan/mindcode)
+ * op 链折叠思路参考自 MlogDecompiler.collapseExpressions()，
+ * 用 hasJumpInRange() 实现等价的跳转安全检查。
  */
 public class ExprHook{
 
@@ -40,7 +30,7 @@ public class ExprHook{
         registerStatement();
     }
 
-    /** 将 ExprStatement 注入 LogicIO.allStatements，使其出现在编辑器的积木列表中。 */
+    // 将 ExprStatement 注入 LogicIO.allStatements，使其出现在编辑器的积木列表中。
     private static void registerStatement(){
         if(statementRegistered) return;
         for(Prov<LStatement> prov : LogicIO.allStatements){
@@ -50,8 +40,6 @@ public class ExprHook{
         statementRegistered = true;
         Log.info("[LogicAssist] ExprStatement registered to LogicIO.allStatements");
     }
-
-    // ===== 折叠：op 链 → ExprStatement =====
 
     public static void foldAll(LCanvas canvas){
         if(canvas == null || canvas.statements == null) return;
@@ -104,7 +92,13 @@ public class ExprHook{
                     ExprStatement exprStmt = new ExprStatement();
                     exprStmt.dest = dest;
                     exprStmt.expr = expr;
-                    exprStmt.lastOps = ops;
+                    // 重新编译优化后的表达式，使 lastOps 反映实际 op 行数
+                    // （rebuild 优化可能减少 op 数量，原 ops 是优化前的）
+                    try{
+                        exprStmt.lastOps = ExprCompiler.compile(dest, expr);
+                    }catch(Exception ignored){
+                        exprStmt.lastOps = ops;
+                    }
 
                     for(int k = 0; k < chainLen; k++){
                         ((StatementElem)children.get(i)).remove();
@@ -134,8 +128,6 @@ public class ExprHook{
         }
     }
 
-    // ===== 展开：ExprStatement → op 链 =====
-
     public static void unfoldAll(LCanvas canvas){
         if(canvas == null || canvas.statements == null) return;
 
@@ -157,7 +149,12 @@ public class ExprHook{
                 ops = ExprCompiler.compile(exprStmt.dest, exprStmt.expr);
             }catch(Exception e){
                 // 编译失败：保留 ExprStatement 不展开，write() 会输出 lastOps
-                // 避免 unfold→fold 循环用 lastOps 重建 ExprStatement 覆盖错误的 expr
+                continue;
+            }
+
+            // 单个 op 不展开：foldAll 要求 chainLen>=2 才折叠，
+            // 展开后无法折叠回来会导致 ExprStatement 丢失
+            if(ops.size() < 2){
                 continue;
             }
 
@@ -189,8 +186,6 @@ public class ExprHook{
         }
     }
 
-    // ===== 跳转索引调整 =====
-
     private static void adjustJumpIndices(LCanvas canvas, int threshold, int delta){
         if(delta == 0) return;
         Seq<Element> children = canvas.statements.getChildren();
@@ -206,7 +201,7 @@ public class ExprHook{
         }
     }
 
-    /** 检查是否有 JumpStatement 的 destIndex 落在 [lo, hi] 范围内 */
+    // 检查是否有 JumpStatement 的 destIndex 落在 [lo, hi] 范围内
     private static boolean hasJumpInRange(LCanvas canvas, int lo, int hi){
         if(lo > hi) return false;
         Seq<Element> children = canvas.statements.getChildren();
@@ -223,7 +218,37 @@ public class ExprHook{
         return false;
     }
 
-    // ===== 工具方法 =====
+    // 检测 canvas 中是否有 print 指令包含 "expr-opt:true"，据此更新优化开关。
+    // 开关状态变化时清空所有 ExprStatement.lastOps，强制下次重新编译。
+    public static void updateOptimizationFlag(LCanvas canvas){
+        boolean enabled = false;
+        if(canvas != null && canvas.statements != null){
+            for(Element child : canvas.statements.getChildren()){
+                if(!(child instanceof StatementElem)) continue;
+                LStatement st = ((StatementElem)child).st;
+                if(st instanceof PrintStatement){
+                    String value = ((PrintStatement)st).value;
+                    if(value != null && value.contains("expr-opt:true")){
+                        enabled = true;
+                        break;
+                    }
+                }
+            }
+        }
+        // 开关状态变化时清空 lastOps，强制 updateMlogAddresses 重新编译
+        if(enabled != ExprCompiler.optimizationEnabled){
+            ExprCompiler.optimizationEnabled = enabled;
+            if(canvas != null && canvas.statements != null){
+                for(Element child : canvas.statements.getChildren()){
+                    if(!(child instanceof StatementElem)) continue;
+                    LStatement st = ((StatementElem)child).st;
+                    if(st instanceof ExprStatement){
+                        ((ExprStatement)st).lastOps = null;
+                    }
+                }
+            }
+        }
+    }
 
     private static void saveUIAll(LCanvas canvas){
         for(Element child : canvas.statements.getChildren()){

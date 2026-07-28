@@ -13,11 +13,8 @@ import mindustry.mod.*;
 
 /**
  * Logic Assist 模组主类。
- *
- * 逻辑编辑器增强模组，提供跳转线着色、框选批量操作、复杂表达式编辑等功能。
- * 继承 {@link Mod}，在 init() 中注册事件监听和设置项。
- *
- * 用 LogicCanvas 替换原版 LCanvas，实现零延迟表达式折叠。
+ * 逻辑编辑器增强：跳转线着色、框选批量操作、表达式编辑、JUMP 跳转。
+ * 用 LogicCanvas 替换原版 LCanvas 实现零延迟表达式折叠。
  */
 public class LogicAssistMod extends Mod{
 
@@ -27,7 +24,6 @@ public class LogicAssistMod extends Mod{
 
     @Override
     public void loadContent(){
-        // 本模组不添加游戏内容（方块/物品等），仅增强 UI
         Log.info("[LogicAssist] No content to load (UI-only mod).");
     }
 
@@ -36,7 +32,6 @@ public class LogicAssistMod extends Mod{
         Events.on(ClientLoadEvent.class, e -> {
             Log.info("[LogicAssist] Client loaded, initializing features...");
 
-            // 用 LogicCanvas 替换原版 LCanvas
             replaceCanvas();
 
             JumpLineColor.setupSettings();
@@ -50,7 +45,6 @@ public class LogicAssistMod extends Mod{
         });
     }
 
-    /** 用 LogicCanvas 替换 LogicDialog 中的原版 LCanvas。 */
     private void replaceCanvas(){
         try{
             LogicDialog dialog = Vars.ui.logic;
@@ -60,16 +54,13 @@ public class LogicAssistMod extends Mod{
                 return;
             }
 
-            // 记录原 canvas 在 children 中的索引，用于后续恢复 z-order
-            // Cell.setElement 会把新元素添加到 children 末尾（最高 z-order），
-            // 导致 canvas 覆盖在 MindustryX LogicSupport 面板之上，使面板按钮不可点击。
-            // 替换后需将新 canvas 移回原位置，保持正确的 z-order。
+            // 记录原 canvas 索引，用于恢复 z-order
+            // Cell.setElement 会把新元素加到末尾覆盖 MindustryX 面板，需移回原位
             int canvasIndex = dialog.getChildren().indexOf(old, true);
             if(canvasIndex < 0) canvasIndex = 0;
 
             LogicCanvas lc = new LogicCanvas();
 
-            // 通过 Cell.setElement 替换 UI 元素（自动移除旧元素、添加新元素到 table）
             boolean replaced = false;
             for(Cell<?> cell : dialog.getCells()){
                 if(cell.get() == old){
@@ -82,9 +73,7 @@ public class LogicAssistMod extends Mod{
             if(replaced){
                 dialog.canvas = lc;
 
-                // 恢复 z-order：将 canvas 从 children 末尾移回原位置。
-                // 直接操作 children Seq，避免 remove()/addChildAt() 触发 setScene 回调
-                // （LCanvas.StatementElem.setScene 在 scene=null 时会移除 JumpCurve，导致状态损坏）。
+                // 恢复 z-order：直接操作 children Seq 避免 setScene 回调损坏 JumpCurve 状态
                 Seq<Element> children = dialog.getChildren();
                 int lastIdx = children.size - 1;
                 if(canvasIndex != lastIdx){

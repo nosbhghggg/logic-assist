@@ -17,27 +17,20 @@ import mindustry.ui.Styles;
 import java.util.*;
 
 /**
- * 表达式语句：在逻辑编辑器中以表达式形式显示，保存时自动展开为 op 链。
+ * 表达式语句：以表达式形式显示，保存时自动展开为 op 链。
  *
- * 折叠态：[dest] = [expr Label 覆盖 TextField，点击 Label 切换编辑]
- * 展开态：op cos _0 a 0 / op mul _0 _0 10 / op add x _0 x
- *
- * 关键设计：
- * - write() 输出 op 链文本，保证保存的代码始终是标准 mlog
- * - copy() 直接复制字段，不走 write→read 序列化（防止复制时展开）
- * - 行号显示由 LogicCanvas 管理，不在此类处理
+ * 折叠态：[dest] = [expr]（Label 覆盖 TextField，点击切换编辑）
+ * write() 输出 op 链保证标准 mlog；copy() 直接复制字段不走序列化。
  */
 public class ExprStatement extends LStatement{
 
-    /** 目标变量名 */
     public String dest = "result";
-    /** 表达式字符串 */
     public String expr = "0";
 
-    /** 上次编译的 op 链（用于 fallback、行号计算和调试） */
+    // 上次编译的 op 链（用于 fallback、行号计算和调试）
     public transient List<ExprCompiler.OpLine> lastOps;
 
-    /** 上次编译的错误消息（null = 无错误）。作为字段保持，避免 build() 重建时丢失错误状态 */
+    // 上次编译的错误消息（null = 无错误）。作为字段保持，避免 build() 重建时丢失错误状态
     public transient String lastError = null;
 
     @Override
@@ -81,7 +74,6 @@ public class ExprStatement extends LStatement{
         }
 
         table.left();
-        // dest 字段
         field(table, dest, str -> dest = str);
         table.add(" = ");
 
@@ -105,10 +97,7 @@ public class ExprStatement extends LStatement{
         errorLabel.setAlignment(Align.left);
         errorLabel.visible = false;
 
-        // 更新 Label 的高亮文本与错误提示
-        // 不调用 pack()——pack() 会把宽度设为 getPrefWidth()，而 setWrap(true) 时
-        // getPrefWidth() 返回 0，导致 Label 宽度为 0 无法接收点击。 setText() 已触发
-        // invalidateHierarchy()，Stack 的 layout() 会用正确宽度重新布局。
+        // 不调用 pack()：setWrap(true) 时 getPrefWidth()=0 会导致 Label 宽度为 0
         Runnable updateLabel = () -> {
             if(lastError != null){
                 exprLabel.setColor(Color.scarlet);
@@ -139,12 +128,10 @@ public class ExprStatement extends LStatement{
                 // 输入中的语法错误，保留旧 lastOps，记录错误消息
                 lastError = e.getMessage();
             }
-            // 编辑中实时更新错误提示
             updateLabel.run();
         });
 
-        // Stack 叠放 Label 和 TextField，占同一空间
-        // 覆盖 getPrefWidth() 返回 0，让外层 cell 不被 Stack 的 prefWidth 撑开
+        // Stack 叠放 Label 和 TextField；覆盖 getPrefWidth() 返回 0 避免撑开外层 cell
         arc.scene.ui.layout.Stack stack = new arc.scene.ui.layout.Stack(){
             @Override
             public float getPrefWidth(){ return 0; }
@@ -152,7 +139,7 @@ public class ExprStatement extends LStatement{
         stack.add(exprLabel);
         stack.add(exprField);
         table.add(stack).growX().padLeft(4f).fillX();
-        // TextField 默认隐藏：不参与 Stack 高度计算，Label 换行高度自然撑开 Stack
+        // TextField 默认隐藏，Label 换行高度自然撑开 Stack
         exprField.visible = false;
         exprField.touchable = Touchable.disabled;
 
@@ -161,9 +148,8 @@ public class ExprStatement extends LStatement{
         table.add(errorLabel).growX().padLeft(4f).padTop(2f).colspan(3);
 
         // 点击 Label → 编辑表达式
-        // 移动端：直接弹出原生输入对话框（TextField 被隐藏，其 touchDown 不会触发，
-        //         导致 setOnscreenKeyboardVisible 不被调用，焦点立即丢失）
-        // 桌面端：切换 Label/TextField 可见性，设置焦点进行内联编辑
+        // 移动端弹原生输入框（TextField 隐藏导致 touchDown 不触发键盘），
+        // 桌面端切换 Label/TextField 可见性进行内联编辑
         exprLabel.addListener(new InputListener(){
             @Override
             public boolean touchDown(InputEvent event, float x, float y, int pointer, KeyCode button){
@@ -206,12 +192,12 @@ public class ExprStatement extends LStatement{
         });
     }
 
-    /** 把表达式转为带颜色标记的富文本，用于 Label 高亮显示。
-     *  复用 ExprCompiler.tokenize 分类着色，用 token.start 保留原始空白：
-     *  - 数字：金色
-     *  - 函数名：珊瑚色（后跟左括号）
-     *  - 变量名：白色
-     *  - 运算符/括号/逗号：浅灰 */
+    // 把表达式转为带颜色标记的富文本，用于 Label 高亮显示。
+    // 复用 ExprCompiler.tokenize 分类着色，用 token.start 保留原始空白：
+    // - 数字：金色
+    // - 函数名：珊瑚色（后跟左括号）
+    // - 变量名：白色
+    // - 运算符/括号/逗号：浅灰
     private String highlightExpr(String expr){
         if(expr == null || expr.isEmpty()) return "";
         StringBuilder sb = new StringBuilder();
@@ -242,7 +228,6 @@ public class ExprStatement extends LStatement{
                 sb.append("[").append(color).append("]").append(text).append("[]");
                 lastEnd = tok.start + tok.text.length();
             }
-            // 尾部空白
             if(lastEnd < expr.length()){
                 sb.append(expr, lastEnd, expr.length());
             }
@@ -261,6 +246,7 @@ public class ExprStatement extends LStatement{
         copy.dest = this.dest;
         copy.expr = this.expr;
         copy.lastOps = this.lastOps;
+        copy.lastError = this.lastError;
         return copy;
     }
 
@@ -283,6 +269,20 @@ public class ExprStatement extends LStatement{
         ExprCompiler.OpLine first = ops.get(0);
         return new OpI(LogicOp.valueOf(first.op),
                         builder.var(first.a), builder.var(first.b), builder.var(first.dest));
+    }
+
+    /**
+     * 返回该表达式编译后占用的 mlog 行数。
+     * 用于 LogicCanvas 计算行号标签；调用方按需触发重新编译。
+     * 编译失败时回退为 1 行（保留原占位）。
+     */
+    public int getMlogLineCount(){
+        if(lastOps == null){
+            try{
+                lastOps = ExprCompiler.compile(dest, expr);
+            }catch(Exception ignored){}
+        }
+        return (lastOps != null) ? lastOps.size() : 1;
     }
 
     @Override

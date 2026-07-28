@@ -2,7 +2,9 @@
 
 [English](README.md) | [中文](README_zh.md)
 
-一个 Mindustry 模组，为游戏内逻辑编辑器增加跳转线着色、积木框选批量操作和表达式编辑功能。
+<p align="center"><img src="logo.svg" width="200" alt="Logic Assist Logo"></p>
+
+一个 Mindustry 模组，为游戏内逻辑编辑器增加跳转线着色、积木框选批量操作、表达式编辑和 JUMP 跳转导航功能。
 
 ## 功能
 
@@ -23,6 +25,14 @@
 - `Ctrl` + 点击单积木 → 复制拖动；`Delete`/`Backspace` → 删除选中；右键/`Esc` → 取消
 - 选中后，选中积木上的按钮变为批量操作：垃圾桶 → 批量删除，`+` → 向下复制，复制图标 → 切换模式
 
+### 滚动条增强
+
+彩色滚动条（每个积木按类别颜色着色）、点击跳转和悬浮跳转：拖动积木或 JUMP 箭头时鼠标接近滚动条即跳转到对应位置。可在游戏模组设置中开关。
+
+### JUMP 跳转按钮
+
+为 `jump` 积木添加 `JUMP` 按钮。点击后滚动到目标积木位置并闪烁高亮。移植自 [MindustryX](https://github.com/TinyLake/MindustryX/)
+
 ### 表达式编辑器（`Expr` 积木）
 
 编写数学表达式，自动编译为 `op` 指令链；打开编辑器时自动把 `op` 链折叠回表达式形式。
@@ -42,23 +52,32 @@ op add x _0 x
 
 **支持的运算符**
 
-| 类别 | 运算符 |
-|---|---|
+| 类别   | 运算符                                                                            |
+| ---- | ------------------------------------------------------------------------------ |
 | 一元函数 | `not abs sign log log10 floor ceil round sqrt rand sin cos tan asin acos atan` |
-| 二元函数 | `max(a,b) min(a,b) angle(a,b) angleDiff(a,b) len(a,b) noise(a,b) logn(a,b)` |
-| 逻辑 | `\|\|` `&&` ` xor ` |
-| 等于 | `==` `!=` `===` `<` `>` `<=` `>=` |
-| 位运算 | `&` `<<` `>>` `>>>` |
-| 算术 | `+` `-` `*` `/` `//` `%` `%%` `^` |
+| 二元函数 | `max(a,b) min(a,b) angle(a,b) angleDiff(a,b) len(a,b) noise(a,b) logn(a,b)`    |
+| 逻辑   | `\|\|` `&&` `xor`                                                              |
+| 等于   | `==` `!=` `===` `<` `>` `<=` `>=`                                              |
+| 位运算  | `&` `<<` `>>` `>>>`                                                            |
+| 算术   | `+` `-` `*` `/` `//` `%` `%%` `^`                                              |
 
 `^` 右结合（`2^3^2 = 2^9`）。优先级：函数调用 > `^` > 一元 > `* / % //` > `+ -` > ...
 
-**跳转安全**：若 `jump` 指向 `op` 链中间，该链保持不折叠以保证语义一致。
+**表达式优化**（默认关闭，在 print 积木输入 `expr-opt:true` 开启。参考 [mindcode](https://github.com/cardillan/mindcode)）：
+
+- **常量折叠**：`1 + 2 * 3` → `7`
+- **代数化简**：`a + 0` → `a`、`a * 1` → `a`、`a - a` → `0`、`a ^ 0` → `1`
+- **公共子表达式消除（CSE）**：`(a+b) * (a+b)` 只计算一次 `a+b` 并复用结果（始终开启）
+- **幂等函数折叠**：`abs(abs(x))` → `abs(x)`、`floor(floor(x))` → `floor(x)`
+- **比较取反**：`!(a < b)` → `a >= b`
+- **吸收律**：`min(a, max(a, b))` → `a`
+- **负号处理**：`a + (-b)` → `a - b`、`-(-x)` → `x`
 
 ## 致谢
 
 - [MI2-utilities](https://github.com/BlackDeluxeCat/MI2-Utilities-Java) —— 拖动移动和跳转索引转换逻辑
-- [mindcode](https://github.com/cardillan/mindcode) —— op 链反编译、运算符分类、优化规则
+- [mindcode](https://github.com/cardillan/mindcode) —— op 链反编译、运算符分类、优化规则（常量折叠、CSE、临时变量消除）
+- [MindustryX](https://github.com/TinyLake/MindustryX/) —— JUMP 按钮实现参考
 
 ## 编译
 
@@ -70,4 +89,4 @@ gradlew deploy
 
 ## 许可证
 
-MIT
+GPL-3.0-or-later。本项目包含源自 [MindustryX](https://github.com/TinyLake/MindustryX/) 的代码，该作品基于 GPL-3.0 协议发布。详见 [LICENSE](LICENSE)。
