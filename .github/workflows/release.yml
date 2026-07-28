@@ -53,7 +53,33 @@ jobs:
           if [ -n "$INPUT_NOTES" ]; then
             printf '%s' "$INPUT_NOTES" > /tmp/release_body.md
           else
-            echo "Universal JAR for desktop and Android." > /tmp/release_body.md
+            cat > /tmp/release_body.md << 'EOF'
+Universal JAR for desktop and Android.
+
+<details>
+<summary>English</summary>
+
+## v1.1.1
+
+- **JUMP button**: Added a JUMP button to jump blocks for quick navigation to target blocks
+- **Expression optimization**: Added expression optimization and common subexpression elimination (CSE) for Expr blocks
+- **Hover-jump**: Added hover-jump for jump lines and block dragging — hover near the scrollbar to instantly jump to that position
+- **Architecture**: Optimized architecture for improved runtime performance
+
+</details>
+
+<details>
+<summary>中文</summary>
+
+## v1.1.1
+
+- **JUMP 跳转按钮**：为 jump 积木添加 JUMP 按钮，快速定位至目标积木
+- **表达式优化**：为 expr 积木添加表达式优化与公共子表达式消除（CSE）
+- **悬浮跳转**：为 jump 跳转线与积木拖动添加悬浮跳转功能，接近滚动条即跳转至对应位置
+- **架构优化**：优化架构，提升运行效率
+
+</details>
+EOF
           fi
           echo "Release notes:" && cat /tmp/release_body.md
 
