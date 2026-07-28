@@ -13,7 +13,6 @@ import arc.scene.ui.*;
 import arc.scene.ui.layout.*;
 import arc.struct.*;
 import arc.util.*;
-import arc.util.Align;
 import mindustry.*;
 import mindustry.gen.*;
 import mindustry.graphics.*;
@@ -442,9 +441,7 @@ public class BoxSelect{
         }
     }
 
-    // 尝试接管选中积木上的按钮点击。
-    // 如果点击的是选中积木上的按钮（删除/+号/复制），执行批量操作并拦截事件。
-    // @return true 如果已拦截，false 如果应放行
+    /** 尝试接管选中积木上的按钮点击。如果点击的是选中积木上的按钮（删除/+号/复制），执行批量操作并拦截事件。返回 true 表示已拦截，false 表示应放行。 */
     private static boolean tryHijackButton(LCanvas canvas, InputEvent event, Element target){
         if(selected.isEmpty()) return false;
 
@@ -1307,8 +1304,7 @@ public class BoxSelect{
         drawElementsWithOffset(canvas, dx, dy, COPY_PREVIEW_ALPHA);
     }
 
-    // 统一的绘制方法：保存矩阵 → 设置 translation → 临时修改 x/y → draw → finally 恢复
-    // @param alpha 1f = 不透明（重画在顶层），0.5f = 半透明（复制预览）
+    /** 统一的绘制方法：保存矩阵 → 设置 translation → 临时修改 x/y → draw → finally 恢复。alpha 为 1f 时不透明（重画在顶层），0.5f 时半透明（复制预览）。 */
     private static void drawElementsWithOffset(LCanvas canvas, float dx, float dy, float alpha){
         if(selected.isEmpty()) return;
 

@@ -3,7 +3,6 @@ package logicassist.expr;
 import arc.*;
 import arc.graphics.*;
 import arc.input.*;
-import arc.math.*;
 import arc.scene.*;
 import arc.scene.event.*;
 import arc.scene.ui.*;

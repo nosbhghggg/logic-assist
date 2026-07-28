@@ -1,6 +1,5 @@
 package logicassist.expr;
 
-import arc.*;
 import arc.func.*;
 import arc.scene.*;
 import arc.struct.*;
