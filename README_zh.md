@@ -2,7 +2,7 @@
 
 [English](README.md) | [中文](README_zh.md)
 
-<p align="center"><img src="logo.svg" width="200" alt="Logic Assist Logo"></p>
+<p align="center"><img src="logo.svg" width="400" alt="Logic Assist Logo"></p>
 
 一个 Mindustry 模组，为游戏内逻辑编辑器增加跳转线着色、积木框选批量操作、表达式编辑和 JUMP 跳转导航功能。
 

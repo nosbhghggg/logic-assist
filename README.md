@@ -2,7 +2,7 @@
 
 [English](README.md) | [中文](README_zh.md)
 
-<p align="center"><img src="logo.svg" width="200" alt="Logic Assist Logo"></p>
+<p align="center"><img src="logo.svg" width="400" alt="Logic Assist Logo"></p>
 
 A Mindustry mod that adds jump-line coloring, block multi-select, an expression editor, and JUMP navigation to the in-game logic editor.
 
