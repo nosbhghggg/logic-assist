@@ -228,7 +228,7 @@ public class JumpLineColor{
                 for(int i = 0; i < cats.size; i++){
                     SettingsMenuDialog.SettingsCategory cat = cats.get(i);
                     if(cat.name.equals("@la.settings")){
-                        String newName = Core.bundle.get("la.settings") + " [yellow]" + Core.bundle.get("la.update.available");
+                        String newName = Core.bundle.get("la.settings") + " " + Core.bundle.get("la.update.available");
                         Cons<SettingsMenuDialog.SettingsTable> builder = cat.builder;
                         Drawable icon = cat.icon;
                         cats.remove(i);
