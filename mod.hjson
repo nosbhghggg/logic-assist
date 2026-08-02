@@ -4,7 +4,7 @@ author: "VT4JIGMQG"
 main: "logicassist.LogicAssistMod"
 description: "Logic editor enhancements: jump line coloring, box select, expression editor, scrollbar enhancement, and JUMP navigation. See https://github.com/nosbhghggg/logic-assist for details."
 subtitle: "Logic editor power tools"
-version: "1.1.1"
+version: "1.1.2"
 minGameVersion: "159"
 java: true
 hidden: true

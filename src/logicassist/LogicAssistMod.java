@@ -35,6 +35,7 @@ public class LogicAssistMod extends Mod{
             replaceCanvas();
 
             JumpLineColor.setupSettings();
+            UpdateChecker.check();
             // JumpLineColor.patchAllCurves 内联到 LogicCanvas.draw()
             // 缓存清理在 dialog 关闭时触发
             Vars.ui.logic.hidden(() -> JumpLineColor.clearCache());

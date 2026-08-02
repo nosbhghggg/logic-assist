@@ -35,6 +35,9 @@ Adds a `JUMP` button to `jump` blocks. Click to scroll the target block into vie
 
 ### Expression Editor (`Expr` block)
 
+> [!CAUTION]
+> The `Expr` block is experimental and may be unstable. Please back up your logic code before using it.
+
 Write math expressions that compile to `op` chains, and fold `op` chains back into readable expressions.
 
 **Compile**: `result = cos(a) * 10 + x` →

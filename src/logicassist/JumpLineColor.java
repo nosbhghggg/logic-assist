@@ -8,6 +8,7 @@ import arc.scene.*;
 import arc.scene.ui.*;
 import arc.scene.ui.layout.*;
 import arc.scene.style.*;
+import arc.struct.Seq;
 import arc.util.*;
 import mindustry.*;
 import mindustry.gen.*;
@@ -159,9 +160,10 @@ public class JumpLineColor{
             SettingsMenuDialog sd = Vars.ui.settings;
             if(sd == null) return;
 
-            // 检查是否已添加（避免重复）
+            // 检查是否已添加（避免重复，同时兼容带更新提示的分类名）
+            String localized = Core.bundle.get("la.settings");
             for(SettingsMenuDialog.SettingsCategory cat : sd.getCategories()){
-                if(cat.name.equals("@la.settings")) return;
+                if(cat.name.equals("@la.settings") || cat.name.startsWith(localized)) return;
             }
 
             // 使用 settings-icon.png 作为分类图标，回退到模组图标，再回退到 Icon.edit
@@ -186,21 +188,59 @@ public class JumpLineColor{
                 table.checkPref(SETTING_BLOCKCOLOR, true, b -> {});
                 table.checkPref(SETTING_SCROLLBAR, true, b -> {});
 
-                // 反馈按钮：通过 Setting 机制添加，确保 MindustryX 的 build() 重建后仍然存在
+                // 反馈/更新按钮：通过 Setting 机制添加，确保 MindustryX 的 build() 重建后仍然存在
                 // MindustryX 的 SettingsTable.build() 会 clearChildren() 后只按 list 重建，
                 // 直接 table.button() 添加的元素会被清除
+                // 每次 build() 时根据 UpdateChecker.hasUpdate 动态决定显示内容
                 table.pref(new SettingsMenuDialog.SettingsTable.Setting("la-feedback"){
                     @Override
                     public void add(SettingsMenuDialog.SettingsTable t){
-                        t.button("@la.feedback", Icon.github, () ->
-                            Core.app.openURI("https://github.com/nosbhghggg/logic-assist/issues")
-                        ).growX().height(50f).padTop(12f).row();
+                        if(UpdateChecker.hasUpdate){
+                            t.button("@la.update.go", Icon.link, () ->
+                                Core.app.openURI(UpdateChecker.RELEASE_URL)
+                            ).growX().height(50f).padTop(12f).row();
+                        }else{
+                            t.button("@la.feedback", Icon.github, () ->
+                                Core.app.openURI("https://github.com/nosbhghggg/logic-assist/issues")
+                            ).growX().height(50f).padTop(12f).row();
+                        }
                     }
                 });
             });
         }catch(Exception e){
             Log.warn("[LogicAssist] Failed to setup settings: " + e);
         }
+    }
+
+    /**
+     * 更新检查完成后调用：将设置分类名后追加黄色"（有新版本！）"提示。
+     * 移除旧分类并以新名称重新添加，触发分类列表重建。
+     */
+    public static void onUpdateChecked(){
+        if(!UpdateChecker.hasUpdate) return;
+
+        Core.app.post(() -> {
+            try{
+                SettingsMenuDialog sd = Vars.ui.settings;
+                if(sd == null) return;
+
+                Seq<SettingsMenuDialog.SettingsCategory> cats = sd.getCategories();
+                for(int i = 0; i < cats.size; i++){
+                    SettingsMenuDialog.SettingsCategory cat = cats.get(i);
+                    if(cat.name.equals("@la.settings")){
+                        String newName = Core.bundle.get("la.settings") + " [yellow]" + Core.bundle.get("la.update.available");
+                        Cons<SettingsMenuDialog.SettingsTable> builder = cat.builder;
+                        Drawable icon = cat.icon;
+                        cats.remove(i);
+                        sd.addCategory(newName, icon, builder);
+                        Log.info("[LogicAssist] Settings category renamed with update indicator.");
+                        break;
+                    }
+                }
+            }catch(Exception e){
+                Log.warn("[LogicAssist] Failed to update settings category name: " + e);
+            }
+        });
     }
 
     // 清空颜色缓存，在编辑器关闭时调用
