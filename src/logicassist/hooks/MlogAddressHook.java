@@ -8,6 +8,7 @@ import arc.util.*;
 import logicassist.*;
 import logicassist.expr.*;
 import mindustry.logic.*;
+import mindustry.logic.LStatements.*;
 
 import java.lang.reflect.*;
 
@@ -16,6 +17,10 @@ import java.lang.reflect.*;
  *
  * 在 afterAct 阶段更新每个 StatementElem 的行号标签，反映 mlog 实际行号。
  * ExprStatement 通过 getMlogLineCount() 自报占用的行数，其他积木固定 1 行。
+ *
+ * 同时更新 JumpStatement 标题中的目标行号（原版显示 block 索引 dest.index，
+ * 此处覆盖为 mlog 行号）。原版 update 回调在 super.act() 中已执行，
+ * afterAct 在其后运行，覆盖为正确值。
  *
  * 行号更新策略：强制 invalidate+validate 完成 layout 触发原版 updateAddress 设置原版文本，
  * 然后修改 label 为 mlog 行号，最后反射重置 needsLayout=false 防止 draw() 中
@@ -55,9 +60,15 @@ public class MlogAddressHook implements CanvasHook{
 
         boolean changed = false;
         int mlogLine = 0;
-        for(Element child : children){
+        // block 索引 → mlog 起始行号映射，供 JumpStatement 标题使用
+        int[] blockToMlog = new int[children.size];
+
+        for(int idx = 0; idx < children.size; idx++){
+            Element child = children.get(idx);
             if(!(child instanceof LCanvas.StatementElem)) continue;
             LCanvas.StatementElem elem = (LCanvas.StatementElem)child;
+
+            blockToMlog[idx] = mlogLine;
 
             int lineCount;
             if(elem.st instanceof ExprStatement){
@@ -82,6 +93,27 @@ public class MlogAddressHook implements CanvasHook{
             }catch(Exception ignored){}
 
             mlogLine += lineCount;
+        }
+
+        // 覆盖 JumpStatement 标题中的目标行号：
+        // 原版 update 回调显示 dest.index（block 索引），改为 mlog 行号
+        for(Element child : children){
+            if(!(child instanceof LCanvas.StatementElem)) continue;
+            LCanvas.StatementElem elem = (LCanvas.StatementElem)child;
+            if(!(elem.st instanceof JumpStatement)) continue;
+            JumpStatement jump = (JumpStatement)elem.st;
+            if(jump.dest == null) continue;
+
+            int destBlockIdx = children.indexOf(jump.dest);
+            if(destBlockIdx < 0 || destBlockIdx >= blockToMlog.length) continue;
+
+            Label title = (Label)elem.find("statement-name");
+            if(title != null){
+                String expected = jump.name() + " -> " + blockToMlog[destBlockIdx];
+                if(!title.getText().toString().equals(expected)){
+                    title.setText(expected);
+                }
+            }
         }
 
         // setText() 触发了 invalidateHierarchy() → statements.needsLayout = true

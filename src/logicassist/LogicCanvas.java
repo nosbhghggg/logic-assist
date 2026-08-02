@@ -36,11 +36,15 @@ public class LogicCanvas extends LCanvas{
         ExprHook.foldAll(this);
     }
 
-    // save() 不再调用 unfoldAll+foldAll：ExprStatement.write() 已能输出标准 op 链 mlog，
-    // 无需往返修改 canvas 状态。避免 fold/unfold 循环中 lastOps 覆盖错误表达式。
+    // save() 使用 unfoldAll → super.save() → foldAll 三步式：
+    // 展开后每个 block 与 mlog 行 1:1 对应，jump destIndex 天然正确；
+    // 保存后 foldAll 恢复编辑器显示并调整 jump destIndex 回 block 索引。
     @Override
     public String save(){
-        return super.save();
+        ExprHook.unfoldAll(this);
+        String result = super.save();
+        ExprHook.foldAll(this);
+        return result;
     }
 
     // rebuild() 内部 save→load 循环会丢失 ExprStatement 原始 expr：
