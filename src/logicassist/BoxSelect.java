@@ -222,6 +222,24 @@ public class BoxSelect{
                 }
             }
 
+            // 框选期间每帧更新：滚动时（自动滚动或鼠标滚轮）选择范围持续扩展
+            if(state == State.SELECTING){
+                LCanvas c = getCanvas();
+                if(c != null){
+                    float mx = Core.input.mouseX();
+                    float my = Core.input.mouseY();
+                    selCurX = mx;
+                    selCurY = my;
+                    Vec2 curLocal = c.statements.stageToLocalCoordinates(Tmp.v2.set(mx, my));
+                    selCurLocalX = curLocal.x;
+                    selCurLocalY = curLocal.y;
+                    if(dragMoved){
+                        updateSelection(c);
+                    }
+                    autoScroll(c);
+                }
+            }
+
             // 拖动积木时悬浮滚动条快速跳转（原版拖动和 BoxSelect 拖动均支持）
             updateScrollbarHoverJump();
         });
@@ -396,7 +414,7 @@ public class BoxSelect{
                 dragMoved = true;
                 updateSelection(canvas);
             }
-            autoScroll(canvas);
+            // autoScroll 已移至 overlay update，避免每帧双重调用导致滚动速度翻倍
         }else if(state == State.DRAGGING_MOVE || state == State.DRAGGING_COPY){
             updateDrag(canvas, mx, my);
             float dx = Math.abs(mx - dragStartMouseX);
@@ -1111,14 +1129,15 @@ public class BoxSelect{
     }
 
     private static void drawSelectionBox(LCanvas canvas){
-        // 直接用 stage 坐标绘制：selStartX/Y 和 selCurX/Y 已经是 stage 坐标。
-        // 不做 round-trip 转换（stage→local→stage），因为 act 阶段 super.act() 中的
-        // 边缘滚动会修改 pane.scrollY，导致 draw 阶段 statements.stageY 与 startBoxSelect
-        // 时不同，round-trip 会失败，框选起点偏移到错误位置。
-        float minX = Math.min(selStartX, selCurX);
-        float minY = Math.min(selStartY, selCurY);
-        float maxX = Math.max(selStartX, selCurX);
-        float maxY = Math.max(selStartY, selCurY);
+        // 用 local 坐标转 stage 绘制：框选框跟随内容滚动，
+        // 允许在框选过程中滚动以选择更多积木（v1.0.1 行为）。
+        Vec2 startStage = canvas.statements.localToStageCoordinates(Tmp.v1.set(selStartLocalX, selStartLocalY));
+        Vec2 curStage = canvas.statements.localToStageCoordinates(Tmp.v2.set(selCurLocalX, selCurLocalY));
+
+        float minX = Math.min(startStage.x, curStage.x);
+        float minY = Math.min(startStage.y, curStage.y);
+        float maxX = Math.max(startStage.x, curStage.x);
+        float maxY = Math.max(startStage.y, curStage.y);
 
         float sx = minX;
         float sy = minY;
