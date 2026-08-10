@@ -29,7 +29,7 @@ public class UpdateChecker{
             try{
                 var json = new JsonReader().parse(res.getResultAsString());
                 String tag = json.getString("tag_name", "");
-                // tag 格式: v1.1.1
+                
                 latestVersion = tag.startsWith("v") ? tag.substring(1) : tag;
 
                 String current = getCurrentVersion();

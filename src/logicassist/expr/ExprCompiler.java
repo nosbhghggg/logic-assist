@@ -351,7 +351,7 @@ public class ExprCompiler{
         }
     }
 
-    /** 编译表达式为 op 语句链。dest 为目标变量名，expr 为表达式字符串，返回 op 语句列表（最后一条的 dest 为目标变量）。 */
+    // 编译表达式为 op 语句链。dest 为目标变量名，expr 为表达式字符串，返回 op 语句列表（最后一条的 dest 为目标变量）。
     public static List<OpLine> compile(String dest, String expr){
         List<Token> tokens = tokenize(expr);
         Parser parser = new Parser(tokens);
@@ -448,7 +448,7 @@ public class ExprCompiler{
         return null;
     }
 
-    /** 从 op 语句链重建表达式字符串。ops 为 op 语句列表（最后一条的 dest 为目标变量），返回表达式字符串，无法重建时返回 null。 */
+    // 从 op 语句链重建表达式字符串。ops 为 op 语句列表（最后一条的 dest 为目标变量），返回表达式字符串，无法重建时返回 null。
     public static String rebuild(List<OpLine> ops){
         if(ops == null || ops.isEmpty()) return null;
 

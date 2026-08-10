@@ -80,6 +80,9 @@ public class JumpButtonHook{
         if(canvas == null || canvas.statements == null || destField == null) return;
         if(frameCounter++ % 20 != 0) return;
 
+        // 紧凑模式用行号跳转，不注入积木内 JUMP 按钮
+        if(LCanvas.useRows()) return;
+
         // X 端桌面端已自带 JUMP 按钮，跳过
         if(isMindustryX() && (!Vars.mobile || !Core.graphics.isPortrait())) return;
 
@@ -135,16 +138,25 @@ public class JumpButtonHook{
         return false;
     }
 
-    private static void doJump(JumpStatement jump){
+    public static void doJump(JumpStatement jump){
         try{
             StatementElem dest = (StatementElem)destField.get(jump);
             if(dest == null) return;
 
-            // dest.parent=DragLayout, .parent=LCanvas, .parent=ScrollPane
+            // dest.parent=DragLayout(.statements), .parent=ScrollPane 内容表(t)；canvas.parent=pane(ScrollPane)
             Element canvas = dest.parent.parent;
             if(!(canvas.parent instanceof ScrollPane)) return;
             ScrollPane scroll = (ScrollPane)canvas.parent;
-            scroll.setScrollY(scroll.getMaxY() - dest.y + scroll.getHeight() * 0.5f);
+
+            // 复位 fling/pan：JUMP 按钮 touchDown 被按钮消费，FlickScrollListener 不会自动复位
+            // flingTimer/panning，否则 setScrollY() 落入 act() 的 else 分支瞬间跳转而无过渡
+            scroll.cancel();
+            scroll.fling(0, 0, 0);
+            scroll.setVelocityY(0);
+
+            // visualAmountY 在 ScrollPane.act() 中平滑逼近 amountY，产生过渡动画
+            float targetY = Mathf.clamp(scroll.getMaxY() - dest.y + scroll.getHeight() * 0.5f, 0, scroll.getMaxY());
+            scroll.setScrollY(targetY);
 
             if(saveUIMethod != null) saveUIMethod.invoke(jump);
 

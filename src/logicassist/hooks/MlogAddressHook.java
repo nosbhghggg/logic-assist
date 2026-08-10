@@ -1,12 +1,17 @@
 package logicassist.hooks;
 
+import arc.graphics.*;
+import arc.input.*;
 import arc.scene.*;
+import arc.scene.event.*;
+import arc.scene.style.*;
 import arc.scene.ui.*;
 import arc.scene.ui.layout.*;
 import arc.struct.*;
 import arc.util.*;
 import logicassist.*;
 import logicassist.expr.*;
+import mindustry.gen.*;
 import mindustry.logic.*;
 import mindustry.logic.LStatements.*;
 
@@ -30,6 +35,8 @@ import java.lang.reflect.*;
  * 在 JumpButtonHookAdapter 之前（无依赖但顺序稳定）。
  */
 public class MlogAddressHook implements CanvasHook{
+
+    private static final String INTERACTIVE_MARKER = "la-interactive-jump-line";
 
     private static Field addressLabelField;
     private static Field needsLayoutField;
@@ -112,6 +119,37 @@ public class MlogAddressHook implements CanvasHook{
                 String expected = jump.name() + " -> " + blockToMlog[destBlockIdx];
                 if(!title.getText().toString().equals(expected)){
                     title.setText(expected);
+                }
+
+                // 紧凑模式（useRows=true）启用行号跳转，细长条模式用积木内 JUMP 按钮
+                if(!LCanvas.useRows()) continue;
+
+                if(!INTERACTIVE_MARKER.equals(title.userObject)){
+                    title.userObject = INTERACTIVE_MARKER;
+                    title.touchable = Touchable.enabled;
+
+                    // 半透明黑色背景 + 上下 padding 增加按钮高度
+                    Label.LabelStyle newStyle = new Label.LabelStyle(title.getStyle());
+                    BaseDrawable bg = (BaseDrawable)((TextureRegionDrawable)Tex.whiteui).tint(0, 0, 0, 0.4f);
+                    bg.setTopHeight(Scl.scl(4f));
+                    bg.setBottomHeight(Scl.scl(4f));
+                    newStyle.background = bg;
+                    title.setStyle(newStyle);
+
+                    final JumpStatement capturedJump = jump;
+                    title.addListener(new ClickListener(){
+                        @Override
+                        public boolean touchDown(InputEvent event, float x, float y, int pointer, KeyCode button){
+                            boolean result = super.touchDown(event, x, y, pointer, button);
+                            if(result) event.stop();
+                            return result;
+                        }
+
+                        @Override
+                        public void clicked(InputEvent event, float x, float y){
+                            JumpButtonHook.doJump(capturedJump);
+                        }
+                    });
                 }
             }
         }

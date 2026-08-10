@@ -29,9 +29,9 @@ import java.util.*;
  */
 public class JumpLineColor{
 
-    private static final String SETTING_ENABLED = "la-jump-color-enabled";
-    private static final String SETTING_BLOCKCOLOR = "la-jump-color-blockcolor";
-    public static final String SETTING_SCROLLBAR = "la-scrollbar-enabled";
+    public static final String SETTING_JUMP_COLOR_MODE = "la-jump-color-mode";
+    public static final String SETTING_SCROLLBAR_MODE = "la-scrollbar-mode";
+    public static final String SETTING_HOVER_EXPAND = "la-hover-expand";
 
     private static final String MARKER = "la-jump-color-patched";
 
@@ -41,11 +41,32 @@ public class JumpLineColor{
 
     public static int getMode(){
         try{
-            if(!Core.settings.getBool(SETTING_ENABLED, true)) return 0;
-            return Core.settings.getBool(SETTING_BLOCKCOLOR, true) ? 2 : 1;
+            return Core.settings.getInt(SETTING_JUMP_COLOR_MODE, 2);
+        }catch(Exception e){
+            return 2;
+        }
+    }
+
+    // 滚动条模式：0=关闭，1=上色，2=上色+悬浮跳
+    public static int getScrollbarMode(){
+        try{
+            return Core.settings.getInt(SETTING_SCROLLBAR_MODE, 1);
         }catch(Exception e){
             return 1;
         }
+    }
+
+    public static boolean isScrollbarColorEnabled(){
+        return getScrollbarMode() >= 1;
+    }
+
+    public static boolean isScrollbarHoverJumpEnabled(){
+        return getScrollbarMode() >= 2;
+    }
+
+    // 悬浮跳变粗倍率：1.0=原宽度不变，2.0=2倍原宽度
+    public static float getHoverExpandRatio(){
+        return Core.settings.getInt(SETTING_HOVER_EXPAND, 10) / 10f;
     }
 
     // 按目标 index 生成黄金角度 HSV 颜色（相邻 index 颜色差异最大）
@@ -151,10 +172,8 @@ public class JumpLineColor{
         }
     }
 
-    /**
-     * 在主设置菜单中添加 "Logic Assist" 分类。
-     * 使用 settings-icon.png 作为分类图标，包含着色、滚动条、反馈按钮等设置项。
-     */
+    // 在主设置菜单中添加 "Logic Assist" 分类。
+    // 使用 settings-icon.png 作为分类图标，包含着色、滚动条、反馈按钮等设置项。
     public static void setupSettings(){
         try{
             SettingsMenuDialog sd = Vars.ui.settings;
@@ -184,9 +203,12 @@ public class JumpLineColor{
             }
 
             sd.addCategory("@la.settings", categoryIcon, table -> {
-                table.checkPref(SETTING_ENABLED, true, b -> {});
-                table.checkPref(SETTING_BLOCKCOLOR, true, b -> {});
-                table.checkPref(SETTING_SCROLLBAR, true, b -> {});
+                table.sliderPref(SETTING_JUMP_COLOR_MODE, 2, 0, 2, 1,
+                    i -> Core.bundle.get("la.color.mode." + i), null);
+                table.sliderPref(SETTING_SCROLLBAR_MODE, 1, 0, 2, 1,
+                    i -> Core.bundle.get("la.scrollbar.mode." + i), null);
+                table.sliderPref(SETTING_HOVER_EXPAND, 10, 10, 20, 1,
+                    i -> (i / 10f) + "x", null);
 
                 // 反馈/更新按钮：通过 Setting 机制添加，确保 MindustryX 的 build() 重建后仍然存在
                 // MindustryX 的 SettingsTable.build() 会 clearChildren() 后只按 list 重建，
@@ -212,10 +234,8 @@ public class JumpLineColor{
         }
     }
 
-    /**
-     * 更新检查完成后调用：将设置分类名后追加黄色"（有新版本！）"提示。
-     * 移除旧分类并以新名称重新添加，触发分类列表重建。
-     */
+    // 更新检查完成后调用：将设置分类名后追加黄色"（有新版本！）"提示。
+    // 移除旧分类并以新名称重新添加，触发分类列表重建。
     public static void onUpdateChecked(){
         if(!UpdateChecker.hasUpdate) return;
 

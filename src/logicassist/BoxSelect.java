@@ -51,12 +51,12 @@ public class BoxSelect{
     private static final Mat tmpMat2 = new Mat();
 
     public static boolean isScrollbarEnabled(){
-        return Core.settings.getBool(JumpLineColor.SETTING_SCROLLBAR, true);
+        return JumpLineColor.isScrollbarColorEnabled();
     }
 
-    /** 拖动积木时悬浮滚动条快速跳转：与自定义滚动条共用同一开关 */
+    // 拖动积木时悬浮滚动条快速跳转：滚动条模式 >= 2 时启用
     public static boolean isScrollbarJumpEnabled(){
-        return isScrollbarEnabled();
+        return JumpLineColor.isScrollbarHoverJumpEnabled();
     }
 
     private static final Field draggingField;
@@ -122,10 +122,8 @@ public class BoxSelect{
     private static Field vKnobBoundsField;
     private static Field flingTimerField;
 
-    /** 悬浮跳转提示：0=正常, 1=最粗（直接切换，不做插值动画） */
+    // 悬浮跳转提示：0=正常, 1=最粗（直接切换，不做插值动画）
     private static float hoverJumpAnim = 0f;
-    /** 拖动时滚动条向左扩展倍率，最终宽度 = 原宽度 × (1 + 此值) */
-    private static final float HOVER_JUMP_EXPAND_RATIO = 0.8f;
 
     public static void init(){
         Core.app.post(() -> {
@@ -459,7 +457,7 @@ public class BoxSelect{
         }
     }
 
-    /** 尝试接管选中积木上的按钮点击。如果点击的是选中积木上的按钮（删除/+号/复制），执行批量操作并拦截事件。返回 true 表示已拦截，false 表示应放行。 */
+    // 接管选中积木按钮点击（删除/+号/复制），执行批量操作并拦截
     private static boolean tryHijackButton(LCanvas canvas, InputEvent event, Element target){
         if(selected.isEmpty()) return false;
 
@@ -944,7 +942,7 @@ public class BoxSelect{
         }
     }
 
-    /** 初始化滚动条反射字段（vScrollBounds/vKnobBounds/flingTimer） */
+    // 初始化滚动条反射字段（vScrollBounds/vKnobBounds/flingTimer）
     private static void ensureScrollbarFields(){
         try{
             if(vScrollBoundsField == null){
@@ -964,11 +962,9 @@ public class BoxSelect{
         }
     }
 
-    /**
-     * 根据 stage Y 坐标计算滚动比例并设置滚动条位置。
-     * 不调用 pane.cancel()，适用于拖动期间的持续跳转（悬浮跳转）。
-     * 点击跳转由调用方在调用前自行 cancel()。
-     */
+    // 根据 stage Y 坐标计算滚动比例并设置滚动条位置。
+    // 不调用 pane.cancel()，适用于拖动期间的持续跳转（悬浮跳转）。
+    // 点击跳转由调用方在调用前自行 cancel()。
     private static void scrollToStageY(ScrollPane pane, float stageY){
         try{
             ensureScrollbarFields();
@@ -1013,7 +1009,7 @@ public class BoxSelect{
         return isScrollbarHit(canvas.pane, Core.input.mouseX(), Core.input.mouseY());
     }
 
-    /** 检测玩家是否正在拖动积木：BoxSelect 拖动、原版 LCanvas 拖动、或 Jump 箭头拖动选择目标 */
+    // 检测玩家是否正在拖动积木：BoxSelect 拖动、原版 LCanvas 拖动、或 Jump 箭头拖动选择目标
     private static boolean isAnyDragging(LCanvas canvas){
         if(state == State.DRAGGING_MOVE || state == State.DRAGGING_COPY) return true;
         try{
@@ -1022,7 +1018,7 @@ public class BoxSelect{
         return isJumpArrowDragging(canvas);
     }
 
-    /** 检测是否有 JumpButton 正在选择跳转目标（拖动箭头） */
+    // 检测是否有 JumpButton 正在选择跳转目标（拖动箭头）
     private static boolean isJumpArrowDragging(LCanvas canvas){
         if(selectingField == null || canvas == null || canvas.statements == null) return false;
         Group jumps = canvas.statements.jumps;
@@ -1039,13 +1035,11 @@ public class BoxSelect{
         return false;
     }
 
-    /**
-     * 拖动积木时悬浮滚动条快速跳转：
-     * 当玩家手中有积木（拖动中）且鼠标接近滚动条区域时，
-     * 滚动条位置直接跳转到鼠标所悬浮的位置。
-     * 鼠标离开滚动条区域后功能自动停止。
-     * 同时管理滚动条变粗提示动画：拖动中且功能开启时滚动条变粗。
-     */
+    // 拖动积木时悬浮滚动条快速跳转：
+    // 当玩家手中有积木（拖动中）且鼠标接近滚动条区域时，
+    // 滚动条位置直接跳转到鼠标所悬浮的位置。
+    // 鼠标离开滚动条区域后功能自动停止。
+    // 同时管理滚动条变粗提示动画：拖动中且功能开启时滚动条变粗。
     public static void updateScrollbarHoverJump(){
         if(!isScrollbarEnabled() || !isScrollbarJumpEnabled()){
             hoverJumpAnim = 0f;
@@ -1212,7 +1206,8 @@ public class BoxSelect{
         float scrollbarTop = scrollbarBottom + scrollbarH;
 
         // 悬浮跳转提示：拖动中向左扩展滚动条宽度，颜色段同步变宽
-        float expand = scrollbarW * HOVER_JUMP_EXPAND_RATIO * hoverJumpAnim;
+        // 倍率1.0=不扩展（原宽度），2.0=扩展到2倍原宽度
+        float expand = scrollbarW * (JumpLineColor.getHoverExpandRatio() - 1f) * hoverJumpAnim;
         float drawX = scrollbarX - expand;
         float drawW = scrollbarW + expand;
 
@@ -1323,7 +1318,7 @@ public class BoxSelect{
         drawElementsWithOffset(canvas, dx, dy, COPY_PREVIEW_ALPHA);
     }
 
-    /** 统一的绘制方法：保存矩阵 → 设置 translation → 临时修改 x/y → draw → finally 恢复。alpha 为 1f 时不透明（重画在顶层），0.5f 时半透明（复制预览）。 */
+    // alpha=1f 不透明（重画在顶层），0.5f 半透明（复制预览）
     private static void drawElementsWithOffset(LCanvas canvas, float dx, float dy, float alpha){
         if(selected.isEmpty()) return;
 

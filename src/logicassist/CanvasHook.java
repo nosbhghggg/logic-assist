@@ -15,19 +15,19 @@ import mindustry.logic.LCanvas;
  */
 public interface CanvasHook{
 
-    /** super.act() 之前调用。用于保存原版行为可能覆盖的状态。 */
+    // super.act() 之前调用。用于保存原版行为可能覆盖的状态。
     default void beforeAct(LCanvas canvas, float delta){}
 
-    /** super.act() 之后调用。用于注入功能逻辑（更新标志、行号、注入按钮等）。 */
+    // super.act() 之后调用。用于注入功能逻辑（更新标志、行号、注入按钮等）。
     default void afterAct(LCanvas canvas, float delta){}
 
-    /** super.draw() 之前调用。用于绘制需要在积木下方的元素（如插入指示器）。 */
+    // super.draw() 之前调用。用于绘制需要在积木下方的元素（如插入指示器）。
     default void beforeDraw(LCanvas canvas){}
 
-    /** super.draw() 之后调用。用于绘制覆盖在积木上方的元素（如高亮、彩色滚动条）。 */
+    // super.draw() 之后调用。用于绘制覆盖在积木上方的元素（如高亮、彩色滚动条）。
     default void afterDraw(LCanvas canvas){}
 
-    /** LogicCanvas 构造时调用，传入 hooks 列表供顺序注册。 */
+    // LogicCanvas 构造时调用，传入 hooks 列表供顺序注册。
     default void register(Seq<CanvasHook> hooks){
         hooks.add(this);
     }

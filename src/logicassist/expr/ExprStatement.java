@@ -270,11 +270,9 @@ public class ExprStatement extends LStatement{
                         builder.var(first.a), builder.var(first.b), builder.var(first.dest));
     }
 
-    /**
-     * 返回该表达式编译后占用的 mlog 行数。
-     * 用于 LogicCanvas 计算行号标签；调用方按需触发重新编译。
-     * 编译失败时回退为 1 行（保留原占位）。
-     */
+    // 返回该表达式编译后占用的 mlog 行数。
+    // 用于 LogicCanvas 计算行号标签；调用方按需触发重新编译。
+    // 编译失败时回退为 1 行（保留原占位）。
     public int getMlogLineCount(){
         if(lastOps == null){
             try{
