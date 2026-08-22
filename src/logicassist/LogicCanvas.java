@@ -23,11 +23,13 @@ public class LogicCanvas extends LCanvas{
         super();
         // 按执行顺序注册（afterAct: BoxSelect → ExprHook → MlogAddress → JumpButtonHook；
         //                  afterDraw: JumpLineColor → BoxSelect）
+        // LabelCopyHook 操作 dialog 的导出菜单而非 canvas 内容，与顺序无关，追加在末尾
         new BoxSelectHook().register(hooks);
         new ExprHookAdapter().register(hooks);
         new MlogAddressHook().register(hooks);
         new JumpButtonHookAdapter().register(hooks);
         new JumpLineColorHook().register(hooks);
+        new LabelCopyHook().register(hooks);
     }
 
     @Override
