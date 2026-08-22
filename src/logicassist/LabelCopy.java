@@ -42,12 +42,8 @@ public class LabelCopy{
     private static Field rowField, endRowField;
 
     // 已深扫过的 root 对话框（对象身份去重）：每帧扫描时跳过，避免重复遍历大 UI 树；
-    // 对话框隐藏（离开 root，parent=null）后清除记录，允许 GC 且重开时重扫
+    // 对话框隐藏（离开 root，parent=null）后清除记录，允许 GC 且重开重扫
     private static final Seq<Dialog> scannedDialogs = new Seq<>();
-
-    // 上次见到的"编辑"按钮对象：setup() 每次编辑器打开都重建按钮表（clearChildren），
-    // 对象更换即一次新的打开（或 resize 重布局），用于诊断注入链路是否存活
-    private static Element lastEditButton;
 
     static{
         try{
@@ -71,19 +67,7 @@ public class LabelCopy{
     // LogicDialog.shown → setup() 每次重建 buttons（编辑按钮是新对象），
     // 须持续轮询重挂监听；buttons 表只有几个元素，无需节流
     private static void attachEditListener(LCanvas canvas){
-        Element edit = Vars.ui.logic.buttons.find("edit");
-        if(!(edit instanceof Button button)){
-            if(lastEditButton != null){
-                lastEditButton = null;
-                Log.infoTag("LogicAssist", "LabelCopy: edit button disappeared");
-            }
-            return;
-        }
-
-        if(edit != lastEditButton){
-            lastEditButton = edit;
-            Log.infoTag("LogicAssist", "LabelCopy: edit button ready (setup rebuilt), listener attached");
-        }
+        if(!(Vars.ui.logic.buttons.find("edit") instanceof Button button)) return;
 
         for(var listener : button.getListeners()){
             if(listener instanceof EditMenuListener) return;
@@ -106,22 +90,20 @@ public class LabelCopy{
         }
     }
 
-    // 通道①的注入入口：点击后全量扫（无视身份去重——post 时机在帧首，
-    // 常规帧扫描可能尚未跑过；一次点击只执行一次，全量开销可接受）
+    // 通道①的注入入口：点击后全量扫（无视身份去重——一次点击只执行一次，
+    // 全量开销可接受；重复注入被 MARKER 幂等挡住）
     private static void injectFromClick(LCanvas canvas){
         if(Core.scene == null) return;
 
         String copyText = copyButtonText();
 
         // scene root 上的对话框（原版导出菜单 new BaseDialog 后 show 到 root）
-        if(scanElements(Core.scene.getElements(), canvas, copyText)) return;
+        if(scanElements(Core.scene.getElements(), canvas, copyText, false)) return;
 
         // 兜底：个别改版可能把导出菜单嵌在逻辑编辑器内部而非 root，
         // 一次性深扫编辑器自身（含积木子树，仅点击时执行，开销可接受）
         TextButton nested = findButton(Vars.ui.logic, copyText);
-        if(nested != null && injectButton(canvas, nested)) return;
-
-        Log.infoTag("LogicAssist", "LabelCopy: export dialog not found after edit click");
+        if(nested != null) injectButton(canvas, nested);
     }
 
     // 通道②：每帧常规扫描。只深扫新出现的对话框，
@@ -129,26 +111,24 @@ public class LabelCopy{
     private static void scanRootDialogs(LCanvas canvas){
         if(Core.scene == null) return;
 
-        // 清除已隐藏对话框的记录（parent==null 即已离开 root），允许 GC、重开重扫
+        // 清除已隐藏对话框的记录（Dialog.hide() 会 remove() 使 parent 为 null），允许 GC、重开重扫
         for(int i = scannedDialogs.size - 1; i >= 0; i--){
             if(scannedDialogs.get(i).parent == null) scannedDialogs.remove(i);
         }
 
-        String copyText = copyButtonText();
-        Seq<Element> elements = Core.scene.getElements();
-        for(int i = 0; i < elements.size; i++){
-            if(!(elements.get(i) instanceof Dialog dialog) || dialog == Vars.ui.logic) continue;
-            if(scannedDialogs.contains(dialog)) continue;
-            scannedDialogs.add(dialog);
-
-            TextButton copyBtn = findButton(dialog, copyText);
-            if(copyBtn != null) injectButton(canvas, copyBtn);
-        }
+        scanElements(Core.scene.getElements(), canvas, copyButtonText(), true);
     }
 
-    private static boolean scanElements(Seq<Element> elements, LCanvas canvas, String copyText){
+    // 遍历 root 元素中的对话框并注入。dedupe=true 时以对象身份跳过
+    // 已扫过的对话框（每帧常规扫描避免重复遍历大 UI 树）；点击通道
+    // 传 false 全量扫（post 任务执行时当帧 afterAct 可能已扫过该菜单）
+    private static boolean scanElements(Seq<Element> elements, LCanvas canvas, String copyText, boolean dedupe){
         for(int i = 0; i < elements.size; i++){
             if(!(elements.get(i) instanceof Dialog dialog) || dialog == Vars.ui.logic) continue;
+            if(dedupe){
+                if(scannedDialogs.contains(dialog)) continue;
+                scannedDialogs.add(dialog);
+            }
 
             TextButton copyBtn = findButton(dialog, copyText);
             if(copyBtn == null) continue;
@@ -157,8 +137,8 @@ public class LabelCopy{
         return false;
     }
 
-    // 原版按钮文本经 Label.setText 本地化（"@" 前缀解析），
-    // 用 bundle 键取当前语言文本匹配；回退原始键名防 bundle 缺失
+    // 原版按钮文本经 Label.setText 本地化（"@" 前缀走 bundle.get(key, def)，
+    // 缺键时返回带 @ 的原文——与本方法回退一致，匹配永不落空）
     private static String copyButtonText(){
         return Core.bundle != null && Core.bundle.has("copy.clipboard")
             ? Core.bundle.get("copy.clipboard") : "@copy.clipboard";
@@ -178,10 +158,7 @@ public class LabelCopy{
     }
 
     private static boolean injectButton(LCanvas canvas, TextButton copyBtn){
-        if(!(copyBtn.parent instanceof Table table)){
-            Log.infoTag("LogicAssist", "LabelCopy: copy button parent is not a Table, skip");
-            return false;
-        }
+        if(!(copyBtn.parent instanceof Table table)) return false;
         if(table.find(MARKER) != null) return true;
 
         // 先结束当前行（原版最后一个按钮 restart 未调 row()），
@@ -239,10 +216,11 @@ public class LabelCopy{
         }
     }
 
+    // 递归深扫找文本匹配的按钮（按钮文本由 Label.setText 本地化，
+    // 与 copyButtonText() 同链路取值，直接 equals 即可）
     private static TextButton findButton(Element e, String text){
-        if(e instanceof TextButton button){
-            String label = button.getText().toString();
-            if(label.equals(text) || label.equals("@copy.clipboard")) return button;
+        if(e instanceof TextButton button && button.getText().toString().equals(text)){
+            return button;
         }
         if(e instanceof Group group){
             for(Element child : group.getChildren()){
@@ -271,7 +249,7 @@ public class LabelCopy{
 
         try{
             Core.app.setClipboardText(buildLabeled(canvas));
-            if(Vars.ui != null) Vars.ui.showInfoToast(Core.bundle.get("la.copy.labels.done"), 4f);
+            Vars.ui.showInfoToast(Core.bundle.get("la.copy.labels.done"), 4f);
         }catch(Throwable t){
             Log.err("[LogicAssist] Label copy failed", t);
         }
