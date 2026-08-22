@@ -1,0 +1,28 @@
+Project-wide code review: hot-path fixes and dead code removal
+
+Verified against Arc/Mindustry sources and IntelliJ inspections
+(get_file_problems, 17 files, 0 errors):
+
+- MlogAddressHook: drop per-frame invalidate() before validate() -
+  WidgetGroup.validate() already no-ops when needsLayout is false, so
+  the full O(n) layout only runs when vanilla actually marked changes
+  (add/remove always invalidate via childrenChanged)
+- BoxSelect: remove autoScroll() from handleTouchDragged dragging
+  branch - overlay.update() already scrolls each frame, double call
+  doubled the autoscroll speed (SELECTING branch had this fixed already)
+- BoxSelect: consume Delete/Backspace keyDown (return true) to prevent
+  other mods' global listeners from re-processing the same key
+- BoxSelect: drawCopyPreview uses Tmp vectors; drop write-only
+  initialized flag; drop dead mouseRight check (line above already
+  filters to left/middle only)
+- BoxSelectHook: static Mat cache instead of per-frame allocation
+- ExprCompiler: drop unused KNOWN_FUNCS set, unused fromText(),
+  unused PREC_UNARY; tokenizer uses startsWith(op, i) instead of
+  substring().equals()
+- ExprHook/MlogAddressHook: drop redundant casts (find() infers via
+  generic return, remove() is an Element method)
+
+Kept as-is after verification: ExprCompiler paren logic (pow right-
+associativity is correct as written), rebuild()'s null guards
+(cross-method contract), write()/build() duplication (distinct LStatement
+lifecycle phases). Docs resynced.

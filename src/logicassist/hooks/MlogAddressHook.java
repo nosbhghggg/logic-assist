@@ -62,7 +62,11 @@ public class MlogAddressHook implements CanvasHook{
         Seq<Element> children = canvas.statements.getChildren();
         if(children.isEmpty()) return;
 
-        canvas.statements.invalidate();
+        // validate() 自带 needsLayout 检查（Arc WidgetGroup：无待布局直接返回）：
+        // 积木增删/内容变化时原版已通过 invalidateHierarchy 标记 needsLayout，
+        // 此处 validate() 当场消费掉（触发 updateAddress 重设原版文本），
+        // 之后覆写 mlog 行号并重置 needsLayout；无变化帧 validate() 秒退零开销，
+        // 不再每帧强制 invalidate 重跑 O(n) 布局
         canvas.statements.validate();
 
         boolean changed = false;
@@ -114,7 +118,7 @@ public class MlogAddressHook implements CanvasHook{
             int destBlockIdx = children.indexOf(jump.dest);
             if(destBlockIdx < 0 || destBlockIdx >= blockToMlog.length) continue;
 
-            Label title = (Label)elem.find("statement-name");
+            Label title = elem.find("statement-name");
             if(title != null){
                 String expected = jump.name() + " -> " + blockToMlog[destBlockIdx];
                 if(!title.getText().toString().equals(expected)){

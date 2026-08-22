@@ -31,15 +31,9 @@ public class ExprCompiler{
         "max", "min", "angle", "angleDiff", "len", "noise", "logn"
     );
 
-    static final Set<String> KNOWN_FUNCS = new HashSet<>();
-    static{
-        KNOWN_FUNCS.addAll(UNARY_OPS);
-        KNOWN_FUNCS.addAll(FUNC_BINARY_OPS);
-    }
-
     static final int PREC_OR = 1, PREC_AND = 2, PREC_EQ = 3, PREC_REL = 4;
     static final int PREC_XOR = 5, PREC_BAND = 6, PREC_SHIFT = 7;
-    static final int PREC_ADD = 8, PREC_MUL = 9, PREC_UNARY = 10, PREC_POW = 11;
+    static final int PREC_ADD = 8, PREC_MUL = 9, PREC_POW = 11;
     static final int PREC_ATOM = 12;
 
     static final Map<String, String> OP_TO_SYMBOL = new HashMap<>();
@@ -87,11 +81,6 @@ public class ExprCompiler{
         public String toText(){
             return "op " + op + " " + dest + " " + a + " " + b;
         }
-        public static OpLine fromText(String line){
-            String[] parts = line.trim().split("\\s+");
-            if(parts.length < 5 || !parts[0].equals("op")) return null;
-            return new OpLine(parts[1], parts[2], parts[3], parts[4]);
-        }
         @Override public String toString(){ return toText(); }
     }
 
@@ -135,7 +124,7 @@ public class ExprCompiler{
             if(c == ','){ tokens.add(new Token(TokType.COMMA, ",", i)); i++; continue; }
             boolean matched = false;
             for(String op : MULTI_OPS){
-                if(i + op.length() <= len && expr.substring(i, i + op.length()).equals(op)){
+                if(i + op.length() <= len && expr.startsWith(op, i)){
                     tokens.add(new Token(TokType.OP, op, i));
                     i += op.length();
                     matched = true;

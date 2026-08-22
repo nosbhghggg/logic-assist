@@ -19,6 +19,10 @@ import mindustry.logic.LCanvas;
  */
 public class BoxSelectHook implements CanvasHook{
 
+    // afterDraw 每帧调用，静态缓存避免 Mat 分配
+    // （不复用 BoxSelect.tmpMat：drawElementsWithOffset 嵌套使用同名缓存会互相覆盖）
+    private static final Mat tmpMat = new Mat();
+
     private boolean suppress = false;
     private float savedY = 0;
 
@@ -50,7 +54,7 @@ public class BoxSelectHook implements CanvasHook{
         // 当 overlay 不在前景时（IDLE/SELECTED），在画布绘制周期内绘制高亮和彩色滚动条。
         // 避免 overlay.toFront() 干扰 MindustryX 等第三方 UI 的层级管理。
         if(!BoxSelect.isSelecting() && !BoxSelect.isDragging()){
-            Mat oldTrans = new Mat().set(Draw.trans());
+            Mat oldTrans = tmpMat.set(Draw.trans());
             Draw.trans().idt();
             BoxSelect.drawHighlights(canvas);
             if(BoxSelect.isScrollbarEnabled()){

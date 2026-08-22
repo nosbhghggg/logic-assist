@@ -115,7 +115,6 @@ public class BoxSelect{
     private static int[] clipboardSelectedIndices = null;
 
     private static Element overlay;
-    private static boolean initialized = false;
     private static InputListener captureListener;
 
     private static Field vScrollBoundsField;
@@ -134,7 +133,6 @@ public class BoxSelect{
                 return;
             }
             setup(canvas);
-            initialized = true;
             Log.info("[LogicAssist] BoxSelect initialized (event-driven mode).");
 
             // 对话框关闭时重置状态（替代原 tick 轮询检测）
@@ -159,6 +157,9 @@ public class BoxSelect{
                 LCanvas canvas = getCanvas();
                 if(canvas != null){
                     deleteSelected(canvas);
+                    // 原版 LCanvas 不处理 Delete/Backspace（仅 mouseMiddle 复制），
+                    // 消费事件防止其他模组的全局键盘监听对同一按键重复删除
+                    return true;
                 }
                 return false;
             }
@@ -304,13 +305,10 @@ public class BoxSelect{
         LCanvas canvas = getCanvas();
         if(canvas == null || !shouldIntercept(canvas)) return false;
 
-        // 只处理鼠标左键和中键（中键原版用于复制单个积木）
+        // 只处理鼠标左键和中键（中键原版用于复制单个积木），右键放行
         if(button != KeyCode.mouseLeft && button != KeyCode.mouseMiddle){
             return false;
         }
-
-        // 右键在 touchDown 不会被触发（mouseRight），但以防万一
-        if(button == KeyCode.mouseRight) return false;
 
         Vec2 stageCoords = Tmp.v1.set(x, y);
         Element target = event.targetActor;
@@ -420,8 +418,7 @@ public class BoxSelect{
             if(dx > MIN_DRAG_DIST || dy > MIN_DRAG_DIST){
                 dragMoved = true;
             }
-            // 拖动时也支持自动滚动
-            autoScroll(canvas);
+            // autoScroll 已移至 overlay update，避免每帧双重调用导致滚动速度翻倍
         }
     }
 
@@ -1308,10 +1305,10 @@ public class BoxSelect{
 
         float mx = Core.input.mouseX();
         float my = Core.input.mouseY();
-        Vec2 stageMouse = new Vec2();
-        Core.scene.screenToStageCoordinates(stageMouse.set(mx, my));
-        Vec2 localMouse = new Vec2();
-        canvas.statements.stageToLocalCoordinates(localMouse.set(stageMouse));
+        // 拖拽复制期间每帧调用，用 Tmp 向量避免分配
+        // （drawElementsWithOffset 内部会重用 Tmp.v1，此处取值在前不冲突）
+        Vec2 stageMouse = Core.scene.screenToStageCoordinates(Tmp.v1.set(mx, my));
+        Vec2 localMouse = canvas.statements.stageToLocalCoordinates(Tmp.v2.set(stageMouse));
         float dx = localMouse.x - dragStartLocalX;
         float dy = localMouse.y - dragStartLocalY;
 

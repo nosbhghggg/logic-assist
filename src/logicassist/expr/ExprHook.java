@@ -100,7 +100,7 @@ public class ExprHook{
                     }
 
                     for(int k = 0; k < chainLen; k++){
-                        ((StatementElem)children.get(i)).remove();
+                        children.get(i).remove();
                     }
 
                     canvas.addAt(i, exprStmt);
