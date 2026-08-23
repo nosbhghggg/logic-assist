@@ -255,7 +255,7 @@ public class LabelCopy{
         }
     }
 
-    // 标签名 l<积木索引>。jump.destIndex 本就是积木索引（saveUI 从 dest 积木
+    // 标签名 L<积木索引>（大写 L，与数字 1 视觉区分）。jump.destIndex 本就是积木索引（saveUI 从 dest 积木
     // 反查），标签按位置插在目标积木之前，与各积木输出行数无关——因此
     // 无需像 save() 那样先 unfoldAll 再折叠，ExprStatement 多行输出不影响正确性
     public static String buildLabeled(LCanvas canvas){
@@ -280,7 +280,7 @@ public class LabelCopy{
         StringBuilder out = new StringBuilder();
         for(int i = 0; i < size; i++){
             if(targets.contains(i)){
-                out.append("l").append(i).append(":\n");
+                out.append("L").append(i).append(":\n");
             }
 
             Element child = children.get(i);
@@ -298,7 +298,7 @@ public class LabelCopy{
         // 尾部标签：LParser 中标签行不占语句行号，尾标签解析为语句总数，
         // 与原版 jump <size>（跳到程序外即停机）语义一致
         if(targets.contains(size)){
-            out.append("l").append(size).append(":\n");
+            out.append("L").append(size).append(":\n");
         }
         return out.toString();
     }
@@ -309,7 +309,7 @@ public class LabelCopy{
     private static void writeJump(StringBuilder sb, JumpStatement jump, int size){
         sb.append("jump ");
         if(jump.destIndex >= 0 && jump.destIndex <= size){
-            sb.append("l").append(jump.destIndex);
+            sb.append("L").append(jump.destIndex);
         }else{
             sb.append(jump.destIndex);
         }
