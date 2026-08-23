@@ -6,11 +6,11 @@ import mindustry.logic.LCanvas;
 /**
  * LogicCanvas 生命周期扩展点接口。
  *
- * LogicCanvas 在 act/draw 中按 hooks 注册顺序依次调用各阶段方法。
+ * <p>LogicCanvas 在 act/draw 中按 hooks 注册顺序依次调用各阶段方法。
  * 跨阶段共享状态的 Hook（如 BoxSelect 需在 beforeAct 保存 scrollY、afterDraw 绘制高亮）
  * 由同一个 Hook 类实现多个方法，状态保留在 Hook 实例或其委托的 static 状态中。
  *
- * 注册顺序即执行顺序。新增 Hook 时需人工检查与现有 Hook 的依赖关系。
+ * <p>注册顺序即执行顺序。新增 Hook 时需人工检查与现有 Hook 的依赖关系。
  * 详见 docs/adr/0002-canvas-hook-mechanism.md。
  */
 public interface CanvasHook{

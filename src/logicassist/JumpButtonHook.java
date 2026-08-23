@@ -23,8 +23,8 @@ import java.lang.reflect.*;
  * JumpStatement 是原版类无法修改 build，通过 act() 定期检查注入。
  * 按钮插入到内容表 JumpButton 之前，与 X 端位置一致。
  *
- * 致谢：MindustryX (https://github.com/TinyLake/MindustryX/,
- * patches/client/0046-UI-ARC-logic-Support.patch, author: way-zer)
+ * <p>致谢：MindustryX {@code https://github.com/TinyLake/MindustryX}
+ * patches/client/0046-UI-ARC-logic-Support.patch, author: way-zer
  * License: GPL-3.0-or-later
  */
 public class JumpButtonHook{
@@ -88,17 +88,15 @@ public class JumpButtonHook{
 
         Seq<Element> children = canvas.statements.getChildren();
         for(Element child : children){
-            if(!(child instanceof StatementElem)) continue;
-            StatementElem elem = (StatementElem)child;
-            if(!(elem.st instanceof JumpStatement)) continue;
-            injectJumpButton(elem, (JumpStatement)elem.st);
+            if(!(child instanceof StatementElem elem)) continue;
+            if(!(elem.st instanceof JumpStatement jump)) continue;
+            injectJumpButton(elem, jump);
         }
     }
 
     private static void injectJumpButton(StatementElem elem, JumpStatement jump){
         for(Element child : elem.getChildren()){
-            if(!(child instanceof Table)) continue;
-            Table contentTable = (Table)child;
+            if(!(child instanceof Table contentTable)) continue;
             int jumpButtonIndex = findJumpButtonIndex(contentTable);
             if(jumpButtonIndex < 0) continue;
 
@@ -110,16 +108,23 @@ public class JumpButtonHook{
 
             // 添加到末尾后移动到 JumpButton 之前
             Cell<TextButton> cell = contentTable.add(btn).width(80f);
-            Seq<Cell> cells = contentTable.getCells();
+            Seq<Cell<?>> cells = cellsOf(contentTable);
             cells.pop();
             cells.insert(jumpButtonIndex, cell);
             return;
         }
     }
 
+    // Arc Table.getCells() 返回 raw Seq<Cell>，直接声明 Seq<Cell<?>> 会编译错误；
+    // 桥接到通配符类型，把 unchecked 集中在这一处（运行时同一对象，擦除后无差别）
+    @SuppressWarnings("unchecked")
+    private static Seq<Cell<?>> cellsOf(Table table){
+        return (Seq<Cell<?>>)(Seq<?>)table.getCells();
+    }
+
     private static int findJumpButtonIndex(Table table){
         if(jumpButtonClass == null) return -1;
-        Seq<Cell> cells = table.getCells();
+        Seq<Cell<?>> cells = cellsOf(table);
         for(int i = 0; i < cells.size; i++){
             Element e = cells.get(i).get();
             if(jumpButtonClass.isInstance(e)) return i;
@@ -128,11 +133,11 @@ public class JumpButtonHook{
     }
 
     private static boolean hasJumpButton(Table table){
-        for(Cell cell : table.getCells()){
+        for(Cell<?> cell : table.getCells()){
             Element e = cell.get();
             if(!(e instanceof Button)) continue;
             if(MARKER.equals(e.name)) return true;
-            if(e instanceof TextButton && ((TextButton)e).getText().toString().equalsIgnoreCase("JUMP"))
+            if(e instanceof TextButton tb && tb.getText().toString().equalsIgnoreCase("JUMP"))
                 return true;
         }
         return false;
@@ -145,8 +150,7 @@ public class JumpButtonHook{
 
             // dest.parent=DragLayout(.statements), .parent=ScrollPane 内容表(t)；canvas.parent=pane(ScrollPane)
             Element canvas = dest.parent.parent;
-            if(!(canvas.parent instanceof ScrollPane)) return;
-            ScrollPane scroll = (ScrollPane)canvas.parent;
+            if(!(canvas.parent instanceof ScrollPane scroll)) return;
 
             // 复位 fling/pan：JUMP 按钮 touchDown 被按钮消费，FlickScrollListener 不会自动复位
             // flingTimer/panning，否则 setScrollY() 落入 act() 的 else 分支瞬间跳转而无过渡

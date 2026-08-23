@@ -1,7 +1,6 @@
 package logicassist;
 
 import arc.*;
-import arc.graphics.g2d.TextureRegion;
 import arc.scene.*;
 import arc.scene.event.*;
 import arc.scene.style.*;
@@ -14,7 +13,6 @@ import mindustry.gen.*;
 import mindustry.logic.*;
 import mindustry.logic.LCanvas.*;
 import mindustry.logic.LStatements.*;
-import mindustry.mod.Mods;
 import mindustry.ui.*;
 
 import java.lang.reflect.*;
@@ -22,12 +20,12 @@ import java.lang.reflect.*;
 /**
  * 标签复制：在逻辑编辑器"编辑"菜单注入按钮，把代码以标签形式复制到剪贴板。
  *
- * 原版"复制到剪贴板"用 canvas.save()，jump 目标写为行号（积木索引），
+ * <p>原版"复制到剪贴板"用 canvas.save()，jump 目标写为行号（积木索引），
  * 对人不友好且编辑后行号即失效；mlog 原生支持 "name:" 标签行与
  * "jump name ..." 标签跳转（LParser 两遍解析），本类按此格式导出：
  * 标签顶格、语句缩进 4 空格，可直接被"从剪贴板加载"原样读回。
  *
- * 按钮注入走双通道（MARKER 防重，任一通道先到即生效）：
+ * <p>按钮注入走双通道（MARKER 防重，任一通道先到即生效）：
  * ① 点击监听：挂在"编辑"按钮上，原版回调 show 菜单后 post 一帧注入；
  * ② 每帧扫描：afterAct 轮询 scene root，新出现的对话框深扫一次，
  *    发现含"复制到剪贴板"的导出菜单立即注入——不依赖点击事件能否送达，
@@ -144,15 +142,11 @@ public class LabelCopy{
             ? Core.bundle.get("copy.clipboard") : "@copy.clipboard";
     }
 
-    // 模组图标：Mods 加载时把 mod 根的 icon.png 载入 iconTexture（线性过滤），
-    // 与设置分类图标同源（JumpLineColor.setupSettings）；异常或缺失时回退 Icon.copy
+    // 模组图标：直接用游戏图集自带的 alphaaaa（源码 sprites/ui/alphaaaa.png）；
+    // 缺失时回退 Icon.copy
     private static Drawable modIcon(){
-        try{
-            Mods.LoadedMod mod = Vars.mods.getMod(LogicAssistMod.class);
-            if(mod != null && mod.iconTexture != null){
-                return new TextureRegionDrawable(new TextureRegion(mod.iconTexture));
-            }
-        }catch(Throwable ignored){
+        if(Core.atlas.has("alphaaaa")){
+            return new TextureRegionDrawable(Core.atlas.find("alphaaaa"));
         }
         return Icon.copy;
     }
@@ -182,8 +176,8 @@ public class LabelCopy{
         // 移到"复制到剪贴板"之后：pop+insert 只改 cells Seq 顺序，
         // 布局仍按各 cell 存储的 row 定位，须从插入点起依次补写行号；
         // 反射不可用时回退为留在末尾（追加位置本身是合法布局）
-        Seq<Cell> cells = table.getCells();
-        Cell moved = cells.pop();
+        Seq<Cell<?>> cells = cellsOf(table);
+        Cell<?> moved = cells.pop();
         int copyIdx = indexOfCell(table, copyBtn);
         if(copyIdx >= 0){
             cells.insert(copyIdx + 1, moved);
@@ -199,14 +193,21 @@ public class LabelCopy{
         return true;
     }
 
+    // Arc Table.getCells() 返回 raw Seq<Cell>，直接声明 Seq<Cell<?>> 会编译错误；
+    // 桥接到通配符类型，把 unchecked 集中在这一处（运行时同一对象，擦除后无差别）
+    @SuppressWarnings("unchecked")
+    private static Seq<Cell<?>> cellsOf(Table table){
+        return (Seq<Cell<?>>)(Seq<?>)table.getCells();
+    }
+
     // 从 Seq 的 from 位置起按 endRow 标记重排行号（插入点前一 cell 已结束其行）。
     // 该菜单每行一个按钮，各 cell endRow 均为 true，逐行 +1 即可
-    private static boolean relabelRows(Seq<Cell> cells, int from){
+    private static boolean relabelRows(Seq<Cell<?>> cells, int from){
         if(rowField == null || endRowField == null || from <= 0) return false;
         try{
             int row = rowField.getInt(cells.get(from - 1)) + 1;
             for(int i = from; i < cells.size; i++){
-                Cell c = cells.get(i);
+                Cell<?> c = cells.get(i);
                 rowField.setInt(c, row);
                 if(endRowField.getBoolean(c)) row++;
             }
@@ -232,7 +233,7 @@ public class LabelCopy{
     }
 
     private static int indexOfCell(Table table, Element element){
-        Seq<Cell> cells = table.getCells();
+        Seq<Cell<?>> cells = cellsOf(table);
         for(int i = 0; i < cells.size; i++){
             if(cells.get(i).get() == element) return i;
         }
@@ -249,7 +250,6 @@ public class LabelCopy{
 
         try{
             Core.app.setClipboardText(buildLabeled(canvas));
-            Vars.ui.showInfoToast(Core.bundle.get("la.copy.labels.done"), 4f);
         }catch(Throwable t){
             Log.err("[LogicAssist] Label copy failed", t);
         }
@@ -264,14 +264,14 @@ public class LabelCopy{
 
         // 刷新 UI 状态：jump 的 destIndex 从曲线 dest 积木重新反查
         for(Element child : children){
-            if(child instanceof StatementElem) ((StatementElem)child).st.saveUI();
+            if(child instanceof StatementElem se) se.st.saveUI();
         }
 
         // 收集有效跳转目标（积木索引；size 表示跳到程序末尾）
         IntSet targets = new IntSet();
         for(Element child : children){
-            if(!(child instanceof StatementElem)) continue;
-            LStatement st = ((StatementElem)child).st;
+            if(!(child instanceof StatementElem se)) continue;
+            LStatement st = se.st;
             if(st instanceof JumpStatement jump && jump.destIndex >= 0 && jump.destIndex <= size){
                 targets.add(jump.destIndex);
             }
@@ -284,8 +284,8 @@ public class LabelCopy{
             }
 
             Element child = children.get(i);
-            if(!(child instanceof StatementElem)) continue;
-            LStatement st = ((StatementElem)child).st;
+            if(!(child instanceof StatementElem se)) continue;
+            LStatement st = se.st;
 
             StringBuilder sb = new StringBuilder();
             if(st instanceof JumpStatement jump){
@@ -293,7 +293,7 @@ public class LabelCopy{
             }else{
                 st.write(sb);
             }
-            if(sb.length() > 0) appendIndented(out, sb);
+            if(!sb.isEmpty()) appendIndented(out, sb);
         }
         // 尾部标签：LParser 中标签行不占语句行号，尾标签解析为语句总数，
         // 与原版 jump <size>（跳到程序外即停机）语义一致

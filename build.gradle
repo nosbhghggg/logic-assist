@@ -34,6 +34,8 @@ java{
     sourceCompatibility = JavaVersion.VERSION_17
 }
 
+compileJava.options.compilerArgs += ["-Xlint:all,-processing,-classfile"]
+
 ext{
     // Mindustry version to depend on.
     // Valid values:
@@ -49,36 +51,49 @@ dependencies{
     compileOnly mindustryVersion == "be" ? "Anuken:MindustryBuilds:latest" : "Anuken:Mindustry:$mindustryVersion"
 }
 
-tasks.register('jarAndroid'){
-    dependsOn "jar"
-    def projectName = project.name
-
-    doLast{
-        if(!sdkRoot || !new File(sdkRoot).exists()) throw new GradleException("No valid Android SDK found. Ensure that ANDROID_HOME is set to your Android SDK directory.")
-
-        def platformRoot = new File("$sdkRoot/platforms/").listFiles().sort().reverse().find{ f -> new File(f, "android.jar").exists() }
-
-        if(!platformRoot) throw new GradleException("No android.jar found. Ensure that you have an Android platform installed.")
-
-        // find build-tools directory for d8.jar
-        def buildToolsRoot = new File("$sdkRoot/build-tools/").listFiles().sort().reverse().find{ f -> new File(f, "lib/d8.jar").exists() || new File(f, "d8.jar").exists() }
-        if(!buildToolsRoot) throw new GradleException("No d8.jar found. Ensure that you have Android build-tools installed.")
-
-        // d8.jar 路径（build-tools/xx.x.x/lib/d8.jar 或 build-tools/xx.x.x/d8.jar）
-        def d8jar = new File(buildToolsRoot, "lib/d8.jar")
-        if(!d8jar.exists()) d8jar = new File(buildToolsRoot, "d8.jar")
-        def javaExec = System.getProperty("java.home") + "/bin/java"
-
-        //collect dependencies needed for desugaring
-        def classpathFiles = configurations.compileClasspath.asList() + configurations.runtimeClasspath.asList() + [new File(platformRoot, "android.jar")]
-
-        // 用命令数组执行，避免 String.execute() 在 Linux 上不解析引号的问题
-        def cmd = [javaExec, "-cp", d8jar.path, "com.android.tools.r8.D8"]
-        classpathFiles.each{ cmd.addAll(["--classpath", it.path]) }
-        cmd.addAll(["--min-api", "14", "--output", "${projectName}Android.jar", "${projectName}Desktop.jar"])
-
-        cmd.execute(null, new File("build/libs")).waitForProcessOutput(System.out, System.err)
+// 解析 Android SDK 中的 d8.jar 与 android.jar；SDK 缺失时保持 null，任务执行时再报错
+def androidPlatform = null
+def d8JarFile = null
+if(sdkRoot && new File(sdkRoot).exists()){
+    def platformsDir = new File(sdkRoot, "platforms")
+    def buildToolsDir = new File(sdkRoot, "build-tools")
+    if(platformsDir.exists() && buildToolsDir.exists()){
+    def platformRoot = platformsDir.listFiles().sort().reverse().find{ f -> new File(f, "android.jar").exists() }
+    androidPlatform = platformRoot != null ? new File(platformRoot, "android.jar") : null
+        def buildToolsRoot = buildToolsDir.listFiles().sort().reverse().find{ f -> new File(f, "lib/d8.jar").exists() || new File(f, "d8.jar").exists() }
+        if(buildToolsRoot != null){
+            d8JarFile = new File(buildToolsRoot, "lib/d8.jar")
+            if(!d8JarFile.exists()) d8JarFile = new File(buildToolsRoot, "d8.jar")
+        }
     }
+}
+
+// 用 JavaExec 任务类型执行 d8：此前在 doLast 里用 Groovy cmd.execute() 从守护进程
+// fork java.exe，Windows 上会以 0x1000000A 静默退出（无任何输出），且不检查退出码，
+// 失败被吞掉直到 deploy 才报"找不到 Android.jar"。JavaExec 的 fork 由 Gradle 托管，
+// 非零退出码会让任务正确失败
+tasks.register('jarAndroid', JavaExec){
+    dependsOn "jar"
+    description = "Runs d8 on the desktop jar to produce classes.dex for Android."
+    mainClass = "com.android.tools.r8.D8"
+    workingDir = new File(projectDir, "build/libs")
+
+    doFirst{
+        if(d8JarFile == null || androidPlatform == null){
+            throw new GradleException("No valid Android SDK found (need platforms/android.jar and build-tools d8.jar under ANDROID_HOME=${sdkRoot}).")
+        }
+    }
+
+    classpath = files(d8JarFile)
+    // d8.jar 路径（build-tools/xx.x.x/lib/d8.jar 或 build-tools/xx.x.x/d8.jar）
+    // desugaring 需要 android.jar 与依赖 jar；d8 遇到第一个位置参数（输入 jar）后
+    // 停止解析 flag，--classpath 必须全部放在输入 jar 之前，否则被静默忽略
+    def d8Args = ["--min-api", "14"]
+    (configurations.compileClasspath.asList() + configurations.runtimeClasspath.asList() + [androidPlatform]).each{
+        if(it != null) d8Args.addAll(["--classpath", it.path])
+    }
+    d8Args.addAll(["--output", "${project.name}Android.jar", "${project.name}Desktop.jar"])
+    args = d8Args
 }
 
 jar{

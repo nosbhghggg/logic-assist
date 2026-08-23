@@ -11,7 +11,7 @@ import mindustry.logic.LCanvas.*;
 /**
  * 继承原版 LCanvas，仅保留生命周期 dispatch。
  *
- * 5 大功能通过 CanvasHook 接口注册到 hooks Seq，
+ * <p>5 大功能通过 CanvasHook 接口注册到 hooks Seq，
  * act/draw 按 hooks 顺序调用各阶段方法，自身不内联功能逻辑。
  * 详见 docs/adr/0002-canvas-hook-mechanism.md。
  */
@@ -57,10 +57,9 @@ public class LogicCanvas extends LCanvas{
         Seq<String[]> exprStates = new Seq<>();
         if(statements != null){
             for(Element child : statements.getChildren()){
-                if(child instanceof StatementElem){
-                    LStatement st = ((StatementElem)child).st;
-                    if(st instanceof ExprStatement){
-                        ExprStatement es = (ExprStatement)st;
+                if(child instanceof StatementElem se){
+                    LStatement st = se.st;
+                    if(st instanceof ExprStatement es){
                         exprStates.add(new String[]{es.dest, es.expr});
                     }
                 }
@@ -72,10 +71,9 @@ public class LogicCanvas extends LCanvas{
         if(exprStates.any() && statements != null){
             int idx = 0;
             for(Element child : statements.getChildren()){
-                if(child instanceof StatementElem){
-                    LStatement st = ((StatementElem)child).st;
-                    if(st instanceof ExprStatement && idx < exprStates.size){
-                        ExprStatement es = (ExprStatement)st;
+                if(child instanceof StatementElem se){
+                    LStatement st = se.st;
+                    if(st instanceof ExprStatement es && idx < exprStates.size){
                         String[] state = exprStates.get(idx++);
                         es.expr = state[1];
                         // 重新编译更新 lastOps 和 lastError

@@ -14,10 +14,10 @@ import java.util.*;
 /**
  * 表达式集成钩子：提供 op 链 ↔ 表达式的双向转换。
  *
- * foldAll() 由 LogicCanvas.load() 调用，save() 由 LogicCanvas.save() 调用
+ * <p>foldAll() 由 LogicCanvas.load() 调用，save() 由 LogicCanvas.save() 调用
  * （unfoldAll → super.save → foldAll）。
  *
- * 致谢：mindcode (https://github.com/cardillan/mindcode)
+ * <p>致谢：mindcode ({@code https://github.com/cardillan/mindcode})
  * op 链折叠思路参考自 MlogDecompiler.collapseExpressions()，
  * 用 hasJumpInRange() 实现等价的跳转安全检查。
  */
@@ -35,7 +35,7 @@ public class ExprHook{
         for(Prov<LStatement> prov : LogicIO.allStatements){
             if(prov.get() instanceof ExprStatement) return;
         }
-        LogicIO.allStatements.add(() -> new ExprStatement());
+        LogicIO.allStatements.add(ExprStatement::new);
         statementRegistered = true;
         Log.info("[LogicAssist] ExprStatement registered to LogicIO.allStatements");
     }
@@ -51,8 +51,8 @@ public class ExprHook{
         boolean changed = false;
         int i = 0;
         while(i < children.size){
-            if(!(children.get(i) instanceof StatementElem) ||
-               !(((StatementElem)children.get(i)).st instanceof OperationStatement)){
+            if(!(children.get(i) instanceof StatementElem startElem) ||
+               !(startElem.st instanceof OperationStatement)){
                 i++;
                 continue;
             }
@@ -60,11 +60,9 @@ public class ExprHook{
             List<ExprCompiler.OpLine> ops = new ArrayList<>();
             int j = i;
             while(j < children.size){
-                if(!(children.get(j) instanceof StatementElem)) break;
-                StatementElem elem = (StatementElem)children.get(j);
-                if(!(elem.st instanceof OperationStatement)) break;
+                if(!(children.get(j) instanceof StatementElem elem)) break;
+                if(!(elem.st instanceof OperationStatement opStmt)) break;
 
-                OperationStatement opStmt = (OperationStatement)elem.st;
                 ops.add(new ExprCompiler.OpLine(
                     opStmt.op.name(), opStmt.dest, opStmt.a, opStmt.b));
 
@@ -137,11 +135,8 @@ public class ExprHook{
 
         boolean changed = false;
         for(int i = 0; i < children.size; i++){
-            if(!(children.get(i) instanceof StatementElem)) continue;
-            StatementElem elem = (StatementElem)children.get(i);
-            if(!(elem.st instanceof ExprStatement)) continue;
-
-            ExprStatement exprStmt = (ExprStatement)elem.st;
+            if(!(children.get(i) instanceof StatementElem elem)) continue;
+            if(!(elem.st instanceof ExprStatement exprStmt)) continue;
 
             List<ExprCompiler.OpLine> ops;
             try{
@@ -189,10 +184,8 @@ public class ExprHook{
         if(delta == 0) return;
         Seq<Element> children = canvas.statements.getChildren();
         for(Element child : children){
-            if(!(child instanceof StatementElem)) continue;
-            StatementElem elem = (StatementElem)child;
-            if(elem.st instanceof JumpStatement){
-                JumpStatement jump = (JumpStatement)elem.st;
+            if(!(child instanceof StatementElem elem)) continue;
+            if(elem.st instanceof JumpStatement jump){
                 if(jump.destIndex > threshold){
                     jump.destIndex += delta;
                 }
@@ -205,10 +198,8 @@ public class ExprHook{
         if(lo > hi) return false;
         Seq<Element> children = canvas.statements.getChildren();
         for(Element child : children){
-            if(!(child instanceof StatementElem)) continue;
-            StatementElem elem = (StatementElem)child;
-            if(elem.st instanceof JumpStatement){
-                JumpStatement jump = (JumpStatement)elem.st;
+            if(!(child instanceof StatementElem elem)) continue;
+            if(elem.st instanceof JumpStatement jump){
                 if(jump.destIndex >= lo && jump.destIndex <= hi){
                     return true;
                 }
@@ -223,10 +214,10 @@ public class ExprHook{
         boolean enabled = false;
         if(canvas != null && canvas.statements != null){
             for(Element child : canvas.statements.getChildren()){
-                if(!(child instanceof StatementElem)) continue;
-                LStatement st = ((StatementElem)child).st;
-                if(st instanceof PrintStatement){
-                    String value = ((PrintStatement)st).value;
+                if(!(child instanceof StatementElem elem)) continue;
+                LStatement st = elem.st;
+                if(st instanceof PrintStatement print){
+                    String value = print.value;
                     if(value != null && value.contains("expr-opt:true")){
                         enabled = true;
                         break;
@@ -239,10 +230,9 @@ public class ExprHook{
             ExprCompiler.optimizationEnabled = enabled;
             if(canvas != null && canvas.statements != null){
                 for(Element child : canvas.statements.getChildren()){
-                    if(!(child instanceof StatementElem)) continue;
-                    LStatement st = ((StatementElem)child).st;
-                    if(st instanceof ExprStatement){
-                        ((ExprStatement)st).lastOps = null;
+                    if(!(child instanceof StatementElem elem)) continue;
+                    if(elem.st instanceof ExprStatement exprStmt){
+                        exprStmt.lastOps = null;
                     }
                 }
             }
@@ -251,16 +241,16 @@ public class ExprHook{
 
     private static void saveUIAll(LCanvas canvas){
         for(Element child : canvas.statements.getChildren()){
-            if(child instanceof StatementElem){
-                ((StatementElem)child).st.saveUI();
+            if(child instanceof StatementElem elem){
+                elem.st.saveUI();
             }
         }
     }
 
     private static void setupUIAll(LCanvas canvas){
         for(Element child : canvas.statements.getChildren()){
-            if(child instanceof StatementElem){
-                ((StatementElem)child).st.setupUI();
+            if(child instanceof StatementElem elem){
+                elem.st.setupUI();
             }
         }
     }

@@ -24,8 +24,7 @@ import java.util.*;
 /**
  * 跳转线着色：为 jump 跳转线按目标着色，便于区分不同分支。
  *
- * 模式：0=关闭（白色），1=分散色（黄金角度 HSV），2=积木色（类别颜色提亮 1.4×）
- * JumpStatement.dest 是 public 字段，直接强转访问。
+ * <p>模式：0=关闭（白色），1=分散色（黄金角度 HSV），2=积木色（类别颜色提亮 1.4×）
  */
 public class JumpLineColor{
 
@@ -131,10 +130,9 @@ public class JumpLineColor{
                 LStatement st = elem.st;
                 if(st == null) return;
 
-                // 获取跳转目标：JumpStatement.dest 是 public 字段，直接强转
                 LCanvas.StatementElem dest = null;
-                if(st instanceof JumpStatement){
-                    dest = ((JumpStatement)st).dest;
+                if(st instanceof JumpStatement jump){
+                    dest = jump.dest;
                 }
 
                 if(dest == null){
@@ -166,8 +164,8 @@ public class JumpLineColor{
         if(jumps == null) return;
 
         for(Element child : jumps.getChildren()){
-            if(child instanceof LCanvas.JumpCurve){
-                patchCurve((LCanvas.JumpCurve)child);
+            if(child instanceof LCanvas.JumpCurve curve){
+                patchCurve(curve);
             }
         }
     }
@@ -185,13 +183,12 @@ public class JumpLineColor{
                 if(cat.name.equals("@la.settings") || cat.name.startsWith(localized)) return;
             }
 
-            // 使用 settings-icon.png 作为分类图标，回退到模组图标，再回退到 Icon.edit
+            // 分类图标直接用游戏图集自带的 alphaaaa（源码 sprites/ui/alphaaaa.png）；
+            // 回退：模组图标 → Icon.edit
             Drawable categoryIcon = Icon.edit;
-            try{
-                Texture iconTexture = new Texture("settings-icon.png");
-                categoryIcon = new TextureRegionDrawable(new TextureRegion(iconTexture));
-            }catch(Exception e){
-                Log.warn("[LogicAssist] Failed to load settings icon: " + e);
+            if(Core.atlas.has("alphaaaa")){
+                categoryIcon = new TextureRegionDrawable(Core.atlas.find("alphaaaa"));
+            }else{
                 try{
                     Mods.LoadedMod mod = Vars.mods.getMod(LogicAssistMod.class);
                     if(mod != null && mod.iconTexture != null){

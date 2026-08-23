@@ -9,7 +9,7 @@ import mindustry.mod.*;
 /**
  * 模组更新检查器：通过 GitHub API 检查最新 release。
  *
- * 在模组初始化时后台请求，结果存入静态字段供设置界面读取。
+ * <p>在模组初始化时后台请求，结果存入静态字段供设置界面读取。
  */
 public class UpdateChecker{
 
@@ -36,7 +36,7 @@ public class UpdateChecker{
                 if(compareVersions(latestVersion, current) > 0){
                     hasUpdate = true;
                     Log.info("[LogicAssist] Update available: " + latestVersion + " (current: " + current + ")");
-                    Core.app.post(() -> JumpLineColor.onUpdateChecked());
+                    Core.app.post(JumpLineColor::onUpdateChecked);
                 }else{
                     Log.info("[LogicAssist] Up to date: " + current);
                 }

@@ -20,18 +20,18 @@ import java.lang.reflect.*;
 /**
  * mlog 行号标签更新 Hook。
  *
- * 在 afterAct 阶段更新每个 StatementElem 的行号标签，反映 mlog 实际行号。
+ * <p>在 afterAct 阶段更新每个 StatementElem 的行号标签，反映 mlog 实际行号。
  * ExprStatement 通过 getMlogLineCount() 自报占用的行数，其他积木固定 1 行。
  *
- * 同时更新 JumpStatement 标题中的目标行号（原版显示 block 索引 dest.index，
+ * <p>同时更新 JumpStatement 标题中的目标行号（原版显示 block 索引 dest.index，
  * 此处覆盖为 mlog 行号）。原版 update 回调在 super.act() 中已执行，
  * afterAct 在其后运行，覆盖为正确值。
  *
- * 行号更新策略：强制 invalidate+validate 完成 layout 触发原版 updateAddress 设置原版文本，
+ * <p>行号更新策略：validate() 消费待处理布局触发原版 updateAddress 设置原版文本，
  * 然后修改 label 为 mlog 行号，最后反射重置 needsLayout=false 防止 draw() 中
  * validate() 重新 layout 覆盖文本。
  *
- * 必须在 ExprHookAdapter 之后执行（lastOps 已更新），
+ * <p>必须在 ExprHookAdapter 之后执行（lastOps 已更新），
  * 在 JumpButtonHookAdapter 之前（无依赖但顺序稳定）。
  */
 public class MlogAddressHook implements CanvasHook{
@@ -76,14 +76,13 @@ public class MlogAddressHook implements CanvasHook{
 
         for(int idx = 0; idx < children.size; idx++){
             Element child = children.get(idx);
-            if(!(child instanceof LCanvas.StatementElem)) continue;
-            LCanvas.StatementElem elem = (LCanvas.StatementElem)child;
+            if(!(child instanceof LCanvas.StatementElem elem)) continue;
 
             blockToMlog[idx] = mlogLine;
 
             int lineCount;
-            if(elem.st instanceof ExprStatement){
-                lineCount = ((ExprStatement)elem.st).getMlogLineCount();
+            if(elem.st instanceof ExprStatement exprStmt){
+                lineCount = exprStmt.getMlogLineCount();
             }else{
                 lineCount = 1;
             }
@@ -109,10 +108,8 @@ public class MlogAddressHook implements CanvasHook{
         // 覆盖 JumpStatement 标题中的目标行号：
         // 原版 update 回调显示 dest.index（block 索引），改为 mlog 行号
         for(Element child : children){
-            if(!(child instanceof LCanvas.StatementElem)) continue;
-            LCanvas.StatementElem elem = (LCanvas.StatementElem)child;
-            if(!(elem.st instanceof JumpStatement)) continue;
-            JumpStatement jump = (JumpStatement)elem.st;
+            if(!(child instanceof LCanvas.StatementElem elem)) continue;
+            if(!(elem.st instanceof JumpStatement jump)) continue;
             if(jump.dest == null) continue;
 
             int destBlockIdx = children.indexOf(jump.dest);

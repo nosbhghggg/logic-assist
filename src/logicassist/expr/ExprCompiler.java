@@ -1,17 +1,18 @@
 package logicassist.expr;
 
 import arc.Core;
+import java.io.Serial;
 import java.util.*;
 
 /**
  * 表达式编译器：表达式字符串 ↔ op 语句链双向转换。
  *
- * 正向：x = cos(a) * 10 + x → op cos/mul/add 链
+ * <p>正向：x = cos(a) * 10 + x → op cos/mul/add 链
  * 逆向：op 链 → cos(a) * 10 + x
  *
- * 临时变量统一使用 _0, _1, ... 编号，栈式分配复用，支持逆向重建。
+ * <p>临时变量统一使用 _0, _1, ... 编号，栈式分配复用，支持逆向重建。
  *
- * 致谢：mindcode (https://github.com/cardillan/mindcode)
+ * <p>致谢：mindcode ({@code https://github.com/cardillan/mindcode})
  * 反编译、运算符分类、优化规则（常量折叠、CSE、临时变量消除）参考自该项目。
  */
 public class ExprCompiler{
@@ -73,6 +74,8 @@ public class ExprCompiler{
     static class Unary extends Node{ final String op; final Node operand; Unary(String o,Node n){op=o;operand=n;} }
     static class Binary extends Node{ final String op; final Node l,r; Binary(String o,Node a,Node b){op=o;l=a;r=b;} }
 
+    // 不转 record：字段 .op/.dest/.a/.b 在多个文件中被直接访问，转换需改动全部调用点
+    @SuppressWarnings("ClassCanBeRecord")
     public static class OpLine{
         public final String op, dest, a, b;
         public OpLine(String op, String dest, String a, String b){
@@ -85,10 +88,13 @@ public class ExprCompiler{
     }
 
     public static class ParseException extends RuntimeException{
+        @Serial
+        private static final long serialVersionUID = 1L;
         public ParseException(String msg){ super(msg); }
     }
 
     enum TokType{ NUM, IDENT, OP, LPAREN, RPAREN, COMMA, EOF }
+    @SuppressWarnings("ClassCanBeRecord")
     static class Token{
         final TokType type;
         final String text;
@@ -235,14 +241,13 @@ public class ExprCompiler{
             Node left = parseUnary();
             while(isOp("*") || isOp("/") || isOp("//") || isOp("%") || isOp("%%")){
                 String sym = next().text;
-                String op;
-                switch(sym){
-                    case "*": op = "mul"; break;
-                    case "/": op = "div"; break;
-                    case "//": op = "idiv"; break;
-                    case "%": op = "mod"; break;
-                    default: op = "emod"; break;
-                }
+                String op = switch(sym){
+                    case "*" -> "mul";
+                    case "/" -> "div";
+                    case "//" -> "idiv";
+                    case "%" -> "mod";
+                    default -> "emod";
+                };
                 left = new Binary(op, left, parseUnary());
             }
             return left;
@@ -379,12 +384,11 @@ public class ExprCompiler{
         }
 
         String result;
-        if(node instanceof Num){
-            result = formatNum(((Num)node).val);
-        }else if(node instanceof Var){
-            result = ((Var)node).name;
-        }else if(node instanceof Unary){
-            Unary u = (Unary)node;
+        if(node instanceof Num num){
+            result = formatNum(num.val);
+        }else if(node instanceof Var var){
+            result = var.name;
+        }else if(node instanceof Unary u){
             String operand = compileNode(u.operand, ops, temps, cseCache);
             String temp = temps.alloc(operand);
             String opName;
@@ -396,8 +400,7 @@ public class ExprCompiler{
             }
             ops.add(new OpLine(opName, temp, a, b));
             result = temp;
-        }else if(node instanceof Binary){
-            Binary bn = (Binary)node;
+        }else if(node instanceof Binary bn){
             String left = compileNode(bn.l, ops, temps, cseCache);
             String right = compileNode(bn.r, ops, temps, cseCache);
             String temp = temps.alloc(left, right);
@@ -424,14 +427,12 @@ public class ExprCompiler{
     // 交换律未归一化（a+b 和 b+a 签名不同），保守处理避免语义错误。
     // 注意：Num/Var 不单独做 CSE（它们不产生 op），但作为子树参与父节点的签名。
     static String nodeSignature(Node node){
-        if(node instanceof Num) return "N" + ((Num)node).val;
-        if(node instanceof Var) return "V" + ((Var)node).name;
-        if(node instanceof Unary){
-            Unary u = (Unary)node;
+        if(node instanceof Num num) return "N" + num.val;
+        if(node instanceof Var var) return "V" + var.name;
+        if(node instanceof Unary u){
             return "U(" + u.op + "," + nodeSignature(u.operand) + ")";
         }
-        if(node instanceof Binary){
-            Binary b = (Binary)node;
+        if(node instanceof Binary b){
             return "B(" + b.op + "," + nodeSignature(b.l) + "," + nodeSignature(b.r) + ")";
         }
         return null;
@@ -444,15 +445,12 @@ public class ExprCompiler{
         // 从最后一条 op 开始（dest 为目标变量，非临时变量）
         OpLine root = ops.get(ops.size() - 1);
         Node expr = opToNode(root);
-        if(expr == null) return null;
 
         // 向前遍历，替换临时变量引用
         for(int i = ops.size() - 2; i >= 0; i--){
             OpLine op = ops.get(i);
             if(isTemp(op.dest)){
-                Node sub = opToNode(op);
-                if(sub == null) return null;
-                expr = substituteTemp(expr, op.dest, sub);
+                expr = substituteTemp(expr, op.dest, opToNode(op));
             }
         }
 
@@ -549,14 +547,13 @@ public class ExprCompiler{
     //   - 比较取反：!(a<b)=a>=b, !(a==b)=a!=b
     //   - 吸收律：min(a, max(a, b))=a, max(a, min(a, b))=a
     static Node optimize(Node node){
-        if(node instanceof Binary){
-            Binary b = (Binary)node;
+        if(node instanceof Binary b){
             Node l = optimize(b.l);
             Node r = optimize(b.r);
 
             // 常量折叠：两个常量操作数直接计算
-            if(l instanceof Num && r instanceof Num){
-                Double result = computeConstant(b.op, ((Num)l).val, ((Num)r).val);
+            if(l instanceof Num ln && r instanceof Num rn){
+                Double result = computeConstant(b.op, ln.val, rn.val);
                 if(result != null) return new Num(result);
             }
 
@@ -568,21 +565,21 @@ public class ExprCompiler{
                     // a + a = a * 2
                     if(nodesEqual(l, r)) return optimize(new Binary("mul", l, new Num(2)));
                     // a + (-b) = a - b
-                    if(r instanceof Unary && ((Unary)r).op.equals("neg"))
-                        return optimize(new Binary("sub", l, ((Unary)r).operand));
+                    if(r instanceof Unary ru && ru.op.equals("neg"))
+                        return optimize(new Binary("sub", l, ru.operand));
                     // (-a) + b = b - a
-                    if(l instanceof Unary && ((Unary)l).op.equals("neg"))
-                        return optimize(new Binary("sub", r, ((Unary)l).operand));
+                    if(l instanceof Unary lu && lu.op.equals("neg"))
+                        return optimize(new Binary("sub", r, lu.operand));
                     break;
                 case "sub":
                     if(isZero(r)) return l;
                     if(nodesEqual(l, r)) return new Num(0);
                     // a - (-b) = a + b
-                    if(r instanceof Unary && ((Unary)r).op.equals("neg"))
-                        return optimize(new Binary("add", l, ((Unary)r).operand));
+                    if(r instanceof Unary ru && ru.op.equals("neg"))
+                        return optimize(new Binary("add", l, ru.operand));
                     // (-a) - b = -(a + b)
-                    if(l instanceof Unary && ((Unary)l).op.equals("neg"))
-                        return optimize(new Unary("neg", new Binary("add", ((Unary)l).operand, r)));
+                    if(l instanceof Unary lu && lu.op.equals("neg"))
+                        return optimize(new Unary("neg", new Binary("add", lu.operand, r)));
                     break;
                 case "mul":
                     if(isZero(l) || isZero(r)) return new Num(0);
@@ -623,10 +620,8 @@ public class ExprCompiler{
                     if(nodesEqual(l, r)) return new Num(0);
                     break;
                 case "lessThan":
-                    // a < a = false
-                    if(nodesEqual(l, r)) return new Num(0);
-                    break;
                 case "greaterThan":
+                    // a < a = false, a > a = false
                     if(nodesEqual(l, r)) return new Num(0);
                     break;
                 case "lessThanEq":
@@ -652,48 +647,42 @@ public class ExprCompiler{
                     if(nodesEqual(l, r)) return l;
                     // 吸收律：min(a, max(a, b)) = a, max(a, min(a, b)) = a
                     String opposite = b.op.equals("min") ? "max" : "min";
-                    if(r instanceof Binary && ((Binary)r).op.equals(opposite) &&
-                       (nodesEqual(l, ((Binary)r).l) || nodesEqual(l, ((Binary)r).r)))
+                    if(r instanceof Binary rb && rb.op.equals(opposite) &&
+                       (nodesEqual(l, rb.l) || nodesEqual(l, rb.r)))
                         return l;
-                    if(l instanceof Binary && ((Binary)l).op.equals(opposite) &&
-                       (nodesEqual(r, ((Binary)l).l) || nodesEqual(r, ((Binary)l).r)))
+                    if(l instanceof Binary lb && lb.op.equals(opposite) &&
+                       (nodesEqual(r, lb.l) || nodesEqual(r, lb.r)))
                         return r;
                     break;
             }
 
             return new Binary(b.op, l, r);
         }
-        if(node instanceof Unary){
-            Unary u = (Unary)node;
+        if(node instanceof Unary u){
             Node operand = optimize(u.operand);
 
             // 常量折叠：一元运算符的常量操作数直接计算
-            if(operand instanceof Num){
-                Double result = computeUnaryConstant(u.op, ((Num)operand).val);
+            if(operand instanceof Num num){
+                Double result = computeUnaryConstant(u.op, num.val);
                 if(result != null) return new Num(result);
             }
 
             // 嵌套优化：-(-x)=x, !(!x)=x, ~~x=x
-            if(u.op.equals("neg") && operand instanceof Unary && ((Unary)operand).op.equals("neg"))
-                return ((Unary)operand).operand;
-            if(u.op.equals("lnot") && operand instanceof Unary && ((Unary)operand).op.equals("lnot"))
-                return ((Unary)operand).operand;
-            if(u.op.equals("not") && operand instanceof Unary && ((Unary)operand).op.equals("not"))
-                return ((Unary)operand).operand;
+            if(operand instanceof Unary inner && inner.op.equals(u.op) &&
+               (u.op.equals("neg") || u.op.equals("lnot") || u.op.equals("not")))
+                return inner.operand;
             // -0 = 0
             if(u.op.equals("neg") && isZero(operand)) return new Num(0);
 
             // 幂等函数折叠：abs(abs(x))=abs(x), floor(floor(x))=floor(x), ceil(ceil(x))=ceil(x),
             // round(round(x))=round(x), sign(sign(x))=sign(x), sqrt(sqrt(x)) 不折叠（非幂等）
-            if(u.operand instanceof Unary){
-                Unary inner = (Unary)u.operand;
-                if(isIdempotent(u.op) && u.op.equals(inner.op))
+            if(u.operand instanceof Unary rawInner){
+                if(isIdempotent(u.op) && u.op.equals(rawInner.op))
                     return operand; // operand 已是 optimize 后的 inner
             }
 
             // 比较取反：!(a < b) = a >= b, !(a == b) = a != b 等
-            if(u.op.equals("lnot") && operand instanceof Binary){
-                Binary bin = (Binary)operand;
+            if(u.op.equals("lnot") && operand instanceof Binary bin){
                 String inverted = invertComparison(bin.op);
                 if(inverted != null)
                     return optimize(new Binary(inverted, bin.l, bin.r));
@@ -705,51 +694,46 @@ public class ExprCompiler{
     }
 
     static boolean isZero(Node node){
-        return node instanceof Num && ((Num)node).val == 0;
+        return node instanceof Num num && num.val == 0;
     }
 
     static boolean isOne(Node node){
-        return node instanceof Num && ((Num)node).val == 1;
+        return node instanceof Num num && num.val == 1;
     }
 
     static boolean isNegOne(Node node){
-        return node instanceof Num && ((Num)node).val == -1;
+        return node instanceof Num num && num.val == -1;
     }
 
     // 幂等函数：f(f(x)) = f(x)
     static boolean isIdempotent(String op){
-        switch(op){
-            case "abs": case "floor": case "ceil": case "round":
-            case "sign": case "not": case "lnot":
-                return true;
-            default:
-                return false;
-        }
+        return switch(op){
+            case "abs", "floor", "ceil", "round", "sign", "not", "lnot" -> true;
+            default -> false;
+        };
     }
 
     // 比较运算符取反，无法取反时返回 null
     static String invertComparison(String op){
-        switch(op){
-            case "equal": case "strictEqual": return "notEqual";
-            case "notEqual": return "equal";
-            case "lessThan": return "greaterThanEq";
-            case "greaterThan": return "lessThanEq";
-            case "lessThanEq": return "greaterThan";
-            case "greaterThanEq": return "lessThan";
-            default: return null;
-        }
+        return switch(op){
+            case "equal", "strictEqual" -> "notEqual";
+            case "notEqual" -> "equal";
+            case "lessThan" -> "greaterThanEq";
+            case "greaterThan" -> "lessThanEq";
+            case "lessThanEq" -> "greaterThan";
+            case "greaterThanEq" -> "lessThan";
+            default -> null;
+        };
     }
 
     // 判断两个节点是否结构相等（用于 a==a、a-a=0 等简化，以及 CSE 签名辅助）
     static boolean nodesEqual(Node a, Node b){
-        if(a instanceof Num && b instanceof Num) return ((Num)a).val == ((Num)b).val;
-        if(a instanceof Var && b instanceof Var) return ((Var)a).name.equals(((Var)b).name);
-        if(a instanceof Unary && b instanceof Unary){
-            Unary ua = (Unary)a, ub = (Unary)b;
+        if(a instanceof Num na && b instanceof Num nb) return na.val == nb.val;
+        if(a instanceof Var va && b instanceof Var vb) return va.name.equals(vb.name);
+        if(a instanceof Unary ua && b instanceof Unary ub){
             return ua.op.equals(ub.op) && nodesEqual(ua.operand, ub.operand);
         }
-        if(a instanceof Binary && b instanceof Binary){
-            Binary ba = (Binary)a, bb = (Binary)b;
+        if(a instanceof Binary ba && b instanceof Binary bb){
             return ba.op.equals(bb.op) && nodesEqual(ba.l, bb.l) && nodesEqual(ba.r, bb.r);
         }
         return false;
@@ -757,74 +741,71 @@ public class ExprCompiler{
 
     // 二元运算符的常量折叠，无法计算时返回 null
     static Double computeConstant(String op, double a, double b){
-        switch(op){
-            case "add": return a + b;
-            case "sub": return a - b;
-            case "mul": return a * b;
-            case "div": return b != 0 ? a / b : null;
-            case "idiv": return b != 0 ? Math.floor(a / b) : null;
-            case "mod": return b != 0 ? a % b : null;
-            case "emod": return b != 0 ? a - b * Math.floor(a / b) : null;
-            case "pow": return Math.pow(a, b);
-            case "min": return Math.min(a, b);
-            case "max": return Math.max(a, b);
-            case "lessThan": return a < b ? 1.0 : 0.0;
-            case "greaterThan": return a > b ? 1.0 : 0.0;
-            case "lessThanEq": return a <= b ? 1.0 : 0.0;
-            case "greaterThanEq": return a >= b ? 1.0 : 0.0;
-            case "equal":
-            case "strictEqual": return a == b ? 1.0 : 0.0;
-            case "notEqual": return a != b ? 1.0 : 0.0;
-            case "land": return (a != 0 && b != 0) ? 1.0 : 0.0;
-            case "or": return (a != 0 || b != 0) ? 1.0 : 0.0;
-            case "and": return (double)((long)a & (long)b);
-            case "xor": return (double)((long)a ^ (long)b);
-            case "shl": return (double)((long)a << (int)b);
-            case "shr": return (double)((long)a >> (int)b);
-            case "ushr": return (double)((long)a >>> (int)b);
-            case "angle": return Math.atan2(b, a) * 180.0 / Math.PI;
-            case "len": return Math.sqrt(a * a + b * b);
-            case "logn": return (a > 0 && b > 0 && b != 1) ? Math.log(a) / Math.log(b) : null;
-            default: return null; // noise 等随机函数无法常量折叠
-        }
+        return switch(op){
+            case "add" -> a + b;
+            case "sub" -> a - b;
+            case "mul" -> a * b;
+            case "div" -> b != 0 ? a / b : null;
+            case "idiv" -> b != 0 ? Math.floor(a / b) : null;
+            case "mod" -> b != 0 ? a % b : null;
+            case "emod" -> b != 0 ? a - b * Math.floor(a / b) : null;
+            case "pow" -> Math.pow(a, b);
+            case "min" -> Math.min(a, b);
+            case "max" -> Math.max(a, b);
+            case "lessThan" -> a < b ? 1.0 : 0.0;
+            case "greaterThan" -> a > b ? 1.0 : 0.0;
+            case "lessThanEq" -> a <= b ? 1.0 : 0.0;
+            case "greaterThanEq" -> a >= b ? 1.0 : 0.0;
+            case "equal", "strictEqual" -> a == b ? 1.0 : 0.0;
+            case "notEqual" -> a != b ? 1.0 : 0.0;
+            case "land" -> (a != 0 && b != 0) ? 1.0 : 0.0;
+            case "or" -> (a != 0 || b != 0) ? 1.0 : 0.0;
+            case "and" -> (double)((long)a & (long)b);
+            case "xor" -> (double)((long)a ^ (long)b);
+            case "shl" -> (double)((long)a << (int)b);
+            case "shr" -> (double)((long)a >> (int)b);
+            case "ushr" -> (double)((long)a >>> (int)b);
+            case "angle" -> Math.atan2(b, a) * 180.0 / Math.PI;
+            case "len" -> Math.sqrt(a * a + b * b);
+            case "logn" -> (a > 0 && b > 0 && b != 1) ? Math.log(a) / Math.log(b) : null;
+            default -> null; // noise 等随机函数无法常量折叠
+        };
     }
 
     // 一元运算符的常量折叠，无法计算时返回 null
     static Double computeUnaryConstant(String op, double a){
-        switch(op){
-            case "neg": return -a;
-            case "lnot": return a == 0 ? 1.0 : 0.0;
-            case "not": return (double)(~(long)a);
-            case "abs": return Math.abs(a);
-            case "sign": return Math.signum(a);
-            case "log": return a > 0 ? Math.log(a) : null;
-            case "log10": return a > 0 ? Math.log10(a) : null;
-            case "floor": return Math.floor(a);
-            case "ceil": return Math.ceil(a);
-            case "round": return (double)Math.round(a);
-            case "sqrt": return a >= 0 ? Math.sqrt(a) : null;
-            case "sin": return Math.sin(a);
-            case "cos": return Math.cos(a);
-            case "tan": return Math.tan(a);
-            case "asin": return Math.abs(a) <= 1 ? Math.asin(a) : null;
-            case "acos": return Math.abs(a) <= 1 ? Math.acos(a) : null;
-            case "atan": return Math.atan(a);
-            default: return null; // rand 等随机函数无法常量折叠
-        }
+        return switch(op){
+            case "neg" -> -a;
+            case "lnot" -> a == 0 ? 1.0 : 0.0;
+            case "not" -> (double)(~(long)a);
+            case "abs" -> Math.abs(a);
+            case "sign" -> Math.signum(a);
+            case "log" -> a > 0 ? Math.log(a) : null;
+            case "log10" -> a > 0 ? Math.log10(a) : null;
+            case "floor" -> Math.floor(a);
+            case "ceil" -> Math.ceil(a);
+            case "round" -> (double)Math.round(a);
+            case "sqrt" -> a >= 0 ? Math.sqrt(a) : null;
+            case "sin" -> Math.sin(a);
+            case "cos" -> Math.cos(a);
+            case "tan" -> Math.tan(a);
+            case "asin" -> Math.abs(a) <= 1 ? Math.asin(a) : null;
+            case "acos" -> Math.abs(a) <= 1 ? Math.acos(a) : null;
+            case "atan" -> Math.atan(a);
+            default -> null; // rand 等随机函数无法常量折叠
+        };
     }
 
     // 在 AST 中将指定临时变量名替换为 replacement 子树
     static Node substituteTemp(Node node, String tempName, Node replacement){
-        if(node instanceof Var){
-            return ((Var)node).name.equals(tempName) ? replacement : node;
+        if(node instanceof Var var){
+            return var.name.equals(tempName) ? replacement : node;
         }
         if(node instanceof Num) return node;
-        if(node instanceof Unary){
-            Unary u = (Unary)node;
+        if(node instanceof Unary u){
             return new Unary(u.op, substituteTemp(u.operand, tempName, replacement));
         }
-        if(node instanceof Binary){
-            Binary b = (Binary)node;
+        if(node instanceof Binary b){
             return new Binary(b.op,
                 substituteTemp(b.l, tempName, replacement),
                 substituteTemp(b.r, tempName, replacement));
@@ -833,16 +814,15 @@ public class ExprCompiler{
     }
 
     static String nodeToString(Node node){
-        if(node instanceof Num) return formatNum(((Num)node).val);
-        if(node instanceof Var) return ((Var)node).name;
+        if(node instanceof Num num) return formatNum(num.val);
+        if(node instanceof Var var) return var.name;
 
-        if(node instanceof Unary){
-            Unary u = (Unary)node;
+        if(node instanceof Unary u){
             String inner = nodeToString(u.operand);
             if(u.op.equals("neg")){
                 if(u.operand instanceof Binary) return "-(" + inner + ")";
                 if(u.operand instanceof Num) return "-" + inner;
-                if(u.operand instanceof Unary && ((Unary)u.operand).op.equals("neg"))
+                if(u.operand instanceof Unary innerU && innerU.op.equals("neg"))
                     return "-(" + inner + ")";
                 return "-" + inner;
             }
@@ -854,8 +834,7 @@ public class ExprCompiler{
             return u.op + "(" + inner + ")";
         }
 
-        if(node instanceof Binary){
-            Binary b = (Binary)node;
+        if(node instanceof Binary b){
 
             // 函数型二元运算符：输出 func(a, b) 形式（max/min/angle 等）
             // 不走 left+sym+right 路径，避免输出 "10max20" 这种无法被解析器读回的形式
@@ -869,15 +848,15 @@ public class ExprCompiler{
             String right = nodeToString(b.r);
 
             // 左子节点加括号
-            if(b.l instanceof Binary){
-                int lp = getPrecedence(((Binary)b.l).op);
+            if(b.l instanceof Binary bl){
+                int lp = getPrecedence(bl.op);
                 if(lp < prec || (lp == prec && b.op.equals("pow")))
                     left = "(" + left + ")";
             }
 
             // 右子节点加括号
-            if(b.r instanceof Binary){
-                int rp = getPrecedence(((Binary)b.r).op);
+            if(b.r instanceof Binary br){
+                int rp = getPrecedence(br.op);
                 if(rp < prec || (rp == prec && !b.op.equals("pow")))
                     right = "(" + right + ")";
             }

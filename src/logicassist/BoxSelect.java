@@ -28,11 +28,11 @@ import java.util.*;
 /**
  * 框选功能：批量选择、复制、移动、删除积木（事件驱动架构）。
  *
- * 通过 Core.scene.addCaptureListener 在捕获阶段拦截事件，
+ * <p>通过 Core.scene.addCaptureListener 在捕获阶段拦截事件，
  * event.stop() 阻止原版 StatementElem.InputListener 收到事件。
  * 选中积木后接管其功能按钮（删除→批量删除，+→批量复制，复制图标→模式切换）。
  *
- * 致谢：MI2-Utilities (https://github.com/BlackDeluxeCat/MI2-Utilities-Java)
+ * <p>致谢：MI2-Utilities ({@code https://github.com/BlackDeluxeCat/MI2-Utilities-Java})
  * 拖动移动和跳转索引转换逻辑参考自 src/mi2u/ui/LogicHelperMindow.java
  */
 public class BoxSelect{
@@ -129,10 +129,10 @@ public class BoxSelect{
             LCanvas canvas = getCanvas();
             if(canvas == null){
                 // canvas 还没准备好，下一帧重试
-                Core.app.post(() -> init());
+                Core.app.post(BoxSelect::init);
                 return;
             }
-            setup(canvas);
+            setup();
             Log.info("[LogicAssist] BoxSelect initialized (event-driven mode).");
 
             // 对话框关闭时重置状态（替代原 tick 轮询检测）
@@ -166,22 +166,22 @@ public class BoxSelect{
         });
     }
 
-    private static void setup(LCanvas canvas){
+    private static void setup(){
         if(captureListener == null){
             captureListener = new InputListener(){
                 @Override
                 public boolean touchDown(InputEvent event, float x, float y, int pointer, KeyCode button){
-                    return handleTouchDown(event, x, y, pointer, button);
+                    return handleTouchDown(event, x, y, button);
                 }
 
                 @Override
                 public void touchDragged(InputEvent event, float x, float y, int pointer){
-                    handleTouchDragged(event, x, y, pointer);
+                    handleTouchDragged(x, y);
                 }
 
                 @Override
                 public void touchUp(InputEvent event, float x, float y, int pointer, KeyCode button){
-                    handleTouchUp(event, x, y, pointer, button);
+                    handleTouchUp();
                 }
             };
             Core.scene.addCaptureListener(captureListener);
@@ -273,8 +273,8 @@ public class BoxSelect{
         StatementElem stmt = null;
         Element cur = target;
         while(cur != null){
-            if(cur instanceof StatementElem){
-                stmt = (StatementElem)cur;
+            if(cur instanceof StatementElem se){
+                stmt = se;
                 break;
             }
             cur = cur.parent;
@@ -292,8 +292,8 @@ public class BoxSelect{
                 return true;
             }
         }
-        if(elem instanceof Group){
-            Seq<Element> children = ((Group)elem).getChildren();
+        if(elem instanceof Group group){
+            Seq<Element> children = group.getChildren();
             for(int i = 0; i < children.size; i++){
                 if(hasButtonAtRecursive(children.get(i), stageX, stageY)) return true;
             }
@@ -301,7 +301,7 @@ public class BoxSelect{
         return false;
     }
 
-    private static boolean handleTouchDown(InputEvent event, float x, float y, int pointer, KeyCode button){
+    private static boolean handleTouchDown(InputEvent event, float x, float y, KeyCode button){
         LCanvas canvas = getCanvas();
         if(canvas == null || !shouldIntercept(canvas)) return false;
 
@@ -319,10 +319,7 @@ public class BoxSelect{
         }
 
         if(isClickOnButton(target)){
-            if(tryHijackButton(canvas, event, target)){
-                return true;
-            }
-            return false;
+            return tryHijackButton(canvas, event, target);
         }
         // MindustryX 兼容：TextButton（JUMP、注释切换）内部是 Label 而非 Image，
         // 检查祖先链中是否有 Button，有则放行
@@ -350,8 +347,8 @@ public class BoxSelect{
         StatementElem clickedStmt = null;
         Element current = target;
         while(current != null){
-            if(current instanceof StatementElem){
-                clickedStmt = (StatementElem)current;
+            if(current instanceof StatementElem se){
+                clickedStmt = se;
                 break;
             }
             current = current.parent;
@@ -391,17 +388,14 @@ public class BoxSelect{
         return true;
     }
 
-    private static void handleTouchDragged(InputEvent event, float x, float y, int pointer){
+    private static void handleTouchDragged(float x, float y){
         LCanvas canvas = getCanvas();
         if(canvas == null || state == State.IDLE) return;
 
-        float mx = x;
-        float my = y;
-
         if(state == State.SELECTING){
-            selCurX = mx;
-            selCurY = my;
-            Vec2 curLocal = canvas.statements.stageToLocalCoordinates(Tmp.v2.set(mx, my));
+            selCurX = x;
+            selCurY = y;
+            Vec2 curLocal = canvas.statements.stageToLocalCoordinates(Tmp.v2.set(x, y));
             selCurLocalX = curLocal.x;
             selCurLocalY = curLocal.y;
             float dx = Math.abs(selCurX - selStartX);
@@ -412,9 +406,9 @@ public class BoxSelect{
             }
             // autoScroll 已移至 overlay update，避免每帧双重调用导致滚动速度翻倍
         }else if(state == State.DRAGGING_MOVE || state == State.DRAGGING_COPY){
-            updateDrag(canvas, mx, my);
-            float dx = Math.abs(mx - dragStartMouseX);
-            float dy = Math.abs(my - dragStartMouseY);
+            updateDrag(canvas, x, y);
+            float dx = Math.abs(x - dragStartMouseX);
+            float dy = Math.abs(y - dragStartMouseY);
             if(dx > MIN_DRAG_DIST || dy > MIN_DRAG_DIST){
                 dragMoved = true;
             }
@@ -422,7 +416,7 @@ public class BoxSelect{
         }
     }
 
-    private static void handleTouchUp(InputEvent event, float x, float y, int pointer, KeyCode button){
+    private static void handleTouchUp(){
         LCanvas canvas = getCanvas();
         if(canvas == null) return;
 
@@ -434,7 +428,7 @@ public class BoxSelect{
                 if(!selected.isEmpty()){
                     state = State.SELECTED;
                     // 更新选中积木的按钮图标（显示 copy/move 模式）
-                    updateSelectedButtonIcons(canvas);
+                    updateSelectedButtonIcons();
                 }else{
                     state = State.IDLE;
                 }
@@ -466,8 +460,8 @@ public class BoxSelect{
         StatementElem stmtElem = null;
         Element p = btn.parent;
         while(p != null){
-            if(p instanceof StatementElem){
-                stmtElem = (StatementElem)p;
+            if(p instanceof StatementElem se){
+                stmtElem = se;
                 break;
             }
             p = p.parent;
@@ -492,14 +486,14 @@ public class BoxSelect{
         if(icon == Icon.copy || icon == Icon.move){
             event.stop();
             dragMode = (dragMode == DragMode.MOVE) ? DragMode.COPY : DragMode.MOVE;
-            updateSelectedButtonIcons(canvas);
+            updateSelectedButtonIcons();
             return true;
         }
         // 其他按钮放行（MindustryX 的额外按钮等）
         return false;
     }
 
-    private static void updateSelectedButtonIcons(LCanvas canvas){
+    private static void updateSelectedButtonIcons(){
         Drawable modeIcon = (dragMode == DragMode.MOVE) ? Icon.move : Icon.copy;
         for(StatementElem elem : selected){
             findAndSetIcon(elem, Icon.copy, modeIcon);
@@ -512,8 +506,7 @@ public class BoxSelect{
     }
 
     private static boolean findAndSetIconRecursive(Element e, Drawable oldIcon, Drawable newIcon){
-        if(e instanceof ImageButton){
-            ImageButton btn = (ImageButton)e;
+        if(e instanceof ImageButton btn){
             if(btn.getStyle().imageUp == oldIcon){
                 // 创建新样式副本，避免修改全局样式
                 ImageButton.ImageButtonStyle newStyle = new ImageButton.ImageButtonStyle(btn.getStyle());
@@ -522,8 +515,8 @@ public class BoxSelect{
                 return true;
             }
         }
-        if(e instanceof Group){
-            for(Element child : ((Group)e).getChildren()){
+        if(e instanceof Group group){
+            for(Element child : group.getChildren()){
                 if(findAndSetIconRecursive(child, oldIcon, newIcon)) return true;
             }
         }
@@ -533,8 +526,8 @@ public class BoxSelect{
     private static void restoreButtonIcons(LCanvas canvas){
         if(canvas == null || canvas.statements == null) return;
         for(Element child : canvas.statements.getChildren()){
-            if(child instanceof StatementElem){
-                findAndSetIcon((StatementElem)child, Icon.move, Icon.copy);
+            if(child instanceof StatementElem se){
+                findAndSetIcon(se, Icon.move, Icon.copy);
             }
         }
     }
@@ -567,6 +560,17 @@ public class BoxSelect{
 
         adjustJumpDestIndices(copies, selectedIndices, insertPos, copySize);
 
+        insertAndLayoutCopies(canvas, copies, insertPos);
+        // 先恢复所有积木的按钮图标（旧选中积木的 Icon.move 改回 Icon.copy）
+        restoreButtonIcons(canvas);
+        selected.clear();
+        reselectRange(canvas, insertPos, copies.size);
+        enterSelectedState();
+        Log.debug("[LogicAssist] Duplicated " + copies.size + " blocks below selection.");
+    }
+
+    // 副本插入 + 布局收尾（批量复制与拖动复制共用）
+    private static void insertAndLayoutCopies(LCanvas canvas, Seq<LStatement> copies, int insertPos){
         for(int i = 0; i < copies.size; i++){
             canvas.addAt(insertPos + i, copies.get(i));
         }
@@ -583,12 +587,6 @@ public class BoxSelect{
         // 更新所有 Jump 的 destIndex（反映插入后的新位置）并刷新跳转线
         saveAllJumpUI(canvas);
         canvas.statements.jumps.act(0f);
-        // 先恢复所有积木的按钮图标（旧选中积木的 Icon.move 改回 Icon.copy）
-        restoreButtonIcons(canvas);
-        selected.clear();
-        reselectRange(canvas, insertPos, copies.size);
-        enterSelectedState(canvas);
-        Log.debug("[LogicAssist] Duplicated " + copies.size + " blocks below selection.");
     }
 
     private static void startBoxSelect(LCanvas canvas, float mx, float my){
@@ -613,13 +611,13 @@ public class BoxSelect{
         float maxY = Math.max(selStartLocalY, selCurLocalY);
 
         for(Element child : canvas.statements.getChildren()){
-            if(!(child instanceof StatementElem)) continue;
+            if(!(child instanceof StatementElem se)) continue;
             float cx = child.x;
             float cy = child.y;
             float cw = child.getWidth();
             float ch = child.getHeight();
             if(minX < cx + cw && maxX > cx && minY < cy + ch && maxY > cy){
-                selected.add((StatementElem)child);
+                selected.add(se);
             }
         }
     }
@@ -1021,8 +1019,8 @@ public class BoxSelect{
         Group jumps = canvas.statements.jumps;
         if(jumps == null) return false;
         for(Element child : jumps.getChildren()){
-            if(child instanceof LCanvas.JumpCurve){
-                LCanvas.JumpButton button = ((LCanvas.JumpCurve)child).button;
+            if(child instanceof LCanvas.JumpCurve curve){
+                LCanvas.JumpButton button = curve.button;
                 if(button == null) continue;
                 try{
                     if(selectingField.getBoolean(button)) return true;
@@ -1078,7 +1076,7 @@ public class BoxSelect{
         switch(state){
             case SELECTING:
                 drawSelectionBox(canvas);
-                drawHighlights(canvas);
+                drawHighlights();
                 break;
             case DRAGGING_MOVE:
                 // 插入指示器在 LogicCanvas.draw() 中绘制（在积木下方）
@@ -1130,24 +1128,24 @@ public class BoxSelect{
         float maxX = Math.max(startStage.x, curStage.x);
         float maxY = Math.max(startStage.y, curStage.y);
 
-        float sx = minX;
-        float sy = minY;
-        float w = maxX - minX;
-        float h = maxY - minY;
+        drawFillAndBorder(minX, minY, maxX - minX, maxY - minY);
+    }
 
+    // 框选框/选中高亮共用的半透明填充 + 描边绘制
+    private static void drawFillAndBorder(float x, float y, float w, float h){
         Color modeColor = getModeColor();
         Draw.color(modeColor);
         Draw.alpha(FILL_ALPHA);
-        Fill.crect(sx, sy, w, h);
+        Fill.crect(x, y, w, h);
 
         Draw.color(modeColor);
         Draw.alpha(BORDER_ALPHA);
         Lines.stroke(Scl.scl(1.5f), modeColor);
-        Lines.rect(sx, sy, w, h);
+        Lines.rect(x, y, w, h);
         Draw.reset();
     }
 
-    public static void drawHighlights(LCanvas canvas){
+    public static void drawHighlights(){
         if(selected.isEmpty()) return;
 
         float minX = Float.MAX_VALUE, minY = Float.MAX_VALUE;
@@ -1166,16 +1164,7 @@ public class BoxSelect{
         float w = maxX - minX + pad * 2;
         float h = maxY - minY + pad * 2;
 
-        Color modeColor = getModeColor();
-        Draw.color(modeColor);
-        Draw.alpha(FILL_ALPHA);
-        Fill.crect(x, y, w, h);
-
-        Draw.color(modeColor);
-        Draw.alpha(BORDER_ALPHA);
-        Lines.stroke(Scl.scl(1.5f), modeColor);
-        Lines.rect(x, y, w, h);
-        Draw.reset();
+        drawFillAndBorder(x, y, w, h);
     }
 
     // 绘制彩色滚动条：在 ScrollPane 的垂直滚动条轨道上，按每个积木的比例绘制对应类别颜色。
@@ -1185,7 +1174,7 @@ public class BoxSelect{
         if(pane == null || !pane.hasScroll()) return;
 
         // 用反射读取 vScrollBounds（ScrollPane 内部的滚动条轨道 Rect，本地坐标）
-        Rect vScrollBounds = null;
+        Rect vScrollBounds;
         try{
             ensureScrollbarFields();
             vScrollBounds = (Rect)vScrollBoundsField.get(pane);
@@ -1281,7 +1270,7 @@ public class BoxSelect{
     }
 
     // 在 stage 坐标系绘制插入指示器（供 LogicCanvas.draw() 在 super.draw() 前调用）
-    public static void drawInsertIndicatorUnder(LCanvas canvas){
+    public static void drawInsertIndicatorUnder(){
         if(dragInsertPos < 0) return;
         Mat oldTrans = tmpMat.set(Draw.trans());
         Draw.trans(tmpMat2.idt());
@@ -1373,7 +1362,7 @@ public class BoxSelect{
         // saveAllJumpUI 改变了 destIndex，需再次 act 让 JumpCurve 重新连接目标
         canvas.statements.jumps.act(0f);
         reselectRange(canvas, actualInsert, count);
-        enterSelectedState(canvas);
+        enterSelectedState();
         Log.debug("[LogicAssist] Drag-moved " + count + " blocks to position " + actualInsert);
     }
 
@@ -1404,14 +1393,14 @@ public class BoxSelect{
         dragBaseYs = null;
 
         if(clipboardCopies == null || clipboardCopies.isEmpty()){
-            enterSelectedState(canvas);
+            enterSelectedState();
             return;
         }
 
         int currentSize = canvas.statements.getChildren().size;
         if(currentSize + clipboardSize > LExecutor.maxInstructions){
             Log.debug("[LogicAssist] Copy aborted: would exceed maxInstructions");
-            enterSelectedState(canvas);
+            enterSelectedState();
             return;
         }
 
@@ -1423,37 +1412,22 @@ public class BoxSelect{
             copies.add(copy);
         }
         if(copies.isEmpty()){
-            enterSelectedState(canvas);
+            enterSelectedState();
             return;
         }
 
         int actualInsert = Math.max(0, Math.min(insertPos, canvas.statements.getChildren().size));
 
         adjustJumpDestIndices(copies, clipboardSelectedIndices, actualInsert, copies.size);
-        // 先全部插入，再统一 setupUI
-        for(int i = 0; i < copies.size; i++){
-            canvas.addAt(actualInsert + i, copies.get(i));
-        }
-        for(LStatement st : copies){
-            st.setupUI();
-        }
 
-        finalizeLayout(canvas);
-        // MI2 模式：layout 后调用 setupUI() 解析副本中 JumpStatement 的 dest
-        // JumpStatement.setupUI() 会从 destIndex 查找 elem.parent.getChildren() 解析 dest
-        for(LStatement st : copies){
-            if(st instanceof JumpStatement) st.setupUI();
-        }
-        // 更新所有 Jump 的 destIndex（反映插入后的新位置）并刷新跳转线
-        saveAllJumpUI(canvas);
-        canvas.statements.jumps.act(0f);
+        insertAndLayoutCopies(canvas, copies, actualInsert);
         reselectRange(canvas, actualInsert, copies.size);
 
         clipboardCopies = null;
         clipboardSize = 0;
         clipboardSelectedIndices = null;
 
-        enterSelectedState(canvas);
+        enterSelectedState();
         Log.debug("[LogicAssist] Drag-copied " + copies.size + " blocks to position " + insertPos);
     }
 
@@ -1528,11 +1502,11 @@ public class BoxSelect{
         selected.clear();
         Seq<Element> newChildren = canvas.statements.getChildren();
         for(int i = start; i < start + count && i < newChildren.size; i++){
-            if(newChildren.get(i) instanceof StatementElem){
-                selected.add((StatementElem)newChildren.get(i));
+            if(newChildren.get(i) instanceof StatementElem se){
+                selected.add(se);
             }
         }
-        updateSelectedButtonIcons(canvas);
+        updateSelectedButtonIcons();
     }
 
     // 双重 invalidate + validate 处理高度变化后的布局稳定
@@ -1561,7 +1535,7 @@ public class BoxSelect{
         }
     }
 
-    private static void enterSelectedState(LCanvas canvas){
+    private static void enterSelectedState(){
         state = State.SELECTED;
     }
 

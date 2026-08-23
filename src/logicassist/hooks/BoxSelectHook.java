@@ -8,13 +8,13 @@ import mindustry.logic.LCanvas;
 /**
  * BoxSelect 功能的 CanvasHook 实现。
  *
- * 职责：
+ * <p>职责：
  * - beforeAct：拖动期间保存 scrollY（在 super.act() 修改之前）
  * - afterAct：紧接 super.act() 之后恢复 scrollY，抑制原版边缘自动滚动
  * - beforeDraw：拖动期间在积木下方绘制插入指示器
  * - afterDraw：非选中/非拖动状态下绘制高亮和彩色滚动条
  *
- * 跨阶段状态（savedY/suppress）保留在 Hook 实例字段上。
+ * <p>跨阶段状态（savedY/suppress）保留在 Hook 实例字段上。
  * BoxSelect 内部状态机保留 static 不动，本 Hook 只承担生命周期 dispatch。
  */
 public class BoxSelectHook implements CanvasHook{
@@ -45,7 +45,7 @@ public class BoxSelectHook implements CanvasHook{
     @Override
     public void beforeDraw(LCanvas canvas){
         if(BoxSelect.isDragging()){
-            BoxSelect.drawInsertIndicatorUnder(canvas);
+            BoxSelect.drawInsertIndicatorUnder();
         }
     }
 
@@ -56,7 +56,7 @@ public class BoxSelectHook implements CanvasHook{
         if(!BoxSelect.isSelecting() && !BoxSelect.isDragging()){
             Mat oldTrans = tmpMat.set(Draw.trans());
             Draw.trans().idt();
-            BoxSelect.drawHighlights(canvas);
+            BoxSelect.drawHighlights();
             if(BoxSelect.isScrollbarEnabled()){
                 BoxSelect.drawColorScrollbar(canvas);
             }
