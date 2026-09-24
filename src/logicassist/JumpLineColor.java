@@ -31,6 +31,7 @@ public class JumpLineColor{
     public static final String SETTING_JUMP_COLOR_MODE = "la-jump-color-mode";
     public static final String SETTING_SCROLLBAR_MODE = "la-scrollbar-mode";
     public static final String SETTING_HOVER_EXPAND = "la-hover-expand";
+    public static final String SETTING_JUMP_TITLE_BUTTON = "la-jump-title-button";
 
     private static final String MARKER = "la-jump-color-patched";
 
@@ -66,6 +67,15 @@ public class JumpLineColor{
     // 悬浮跳变粗倍率：1.0=原宽度不变，2.0=2倍原宽度
     public static float getHoverExpandRatio(){
         return Core.settings.getInt(SETTING_HOVER_EXPAND, 10) / 10f;
+    }
+
+    // 紧凑模式下 Jump 积木标题的点击跳转按钮（MlogAddressHook 注入）
+    public static boolean isJumpTitleButtonEnabled(){
+        try{
+            return Core.settings.getBool(SETTING_JUMP_TITLE_BUTTON, true);
+        }catch(Exception e){
+            return true;
+        }
     }
 
     // 按目标 index 生成黄金角度 HSV 颜色（相邻 index 颜色差异最大）
@@ -206,6 +216,7 @@ public class JumpLineColor{
                     i -> Core.bundle.get("la.scrollbar.mode." + i), null);
                 table.sliderPref(SETTING_HOVER_EXPAND, 10, 10, 20, 1,
                     i -> (i / 10f) + "x", null);
+                table.checkPref(SETTING_JUMP_TITLE_BUTTON, true);
 
                 // 反馈/更新按钮：通过 Setting 机制添加，确保 MindustryX 的 build() 重建后仍然存在
                 // MindustryX 的 SettingsTable.build() 会 clearChildren() 后只按 list 重建，

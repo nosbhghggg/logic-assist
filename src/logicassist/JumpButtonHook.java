@@ -81,7 +81,7 @@ public class JumpButtonHook{
         if(frameCounter++ % 20 != 0) return;
 
         // 紧凑模式用行号跳转，不注入积木内 JUMP 按钮
-        if(LCanvas.useRows()) return;
+        if(LCanvas.isCompact()) return;
 
         // X 端桌面端已自带 JUMP 按钮，跳过
         if(isMindustryX() && (!Vars.mobile || !Core.graphics.isPortrait())) return;

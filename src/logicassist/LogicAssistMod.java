@@ -41,6 +41,7 @@ public class LogicAssistMod extends Mod{
             Vars.ui.logic.hidden(JumpLineColor::clearCache);
             BoxSelect.init();
             ExprHook.init();
+            VariablePanelHook.install();
 
             Log.info("[LogicAssist] Initialization complete.");
         });

@@ -122,8 +122,17 @@ public class MlogAddressHook implements CanvasHook{
                     title.setText(expected);
                 }
 
-                // 紧凑模式（useRows=true）启用行号跳转，细长条模式用积木内 JUMP 按钮
-                if(!LCanvas.useRows()) continue;
+                // 紧凑模式（isCompact=true）启用行号跳转，细长条模式用积木内 JUMP 按钮
+                if(!LCanvas.isCompact()) continue;
+
+                // 设置可关闭标题跳转按钮：关闭时停用已注入标题的点击（监听器
+                // 无法安全移除，直接禁用触碰）；重新开启时恢复触碰即可，监听器仍在
+                if(!JumpLineColor.isJumpTitleButtonEnabled()){
+                    if(INTERACTIVE_MARKER.equals(title.userObject)){
+                        title.touchable = Touchable.disabled;
+                    }
+                    continue;
+                }
 
                 if(!INTERACTIVE_MARKER.equals(title.userObject)){
                     title.userObject = INTERACTIVE_MARKER;
@@ -151,6 +160,9 @@ public class MlogAddressHook implements CanvasHook{
                             JumpButtonHook.doJump(capturedJump);
                         }
                     });
+                }else{
+                    // 已注入过（如开关关后再开）：恢复触碰，监听器仍然有效
+                    title.touchable = Touchable.enabled;
                 }
             }
         }

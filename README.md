@@ -4,7 +4,7 @@
 
 <p align="center"><img src="logo.svg" width="400" alt="Logic Assist Logo"></p>
 
-A Mindustry mod that adds jump-line coloring, block multi-select, an expression editor, and JUMP navigation to the in-game logic editor.
+A Mindustry mod that adds jump-line coloring, block multi-select, an expression editor, JUMP navigation, and variable panel enhancements to the in-game logic editor. Compatible with Mindustry v160+.
 
 ## Features
 
@@ -31,7 +31,15 @@ Colored scrollbar (each segment tinted by its block's category color), click-to-
 
 ### JUMP Button
 
-Adds a `JUMP` button to `jump` blocks. Click to scroll the target block into view with a flashing highlight. Ported from [MindustryX](https://github.com/TinyLake/MindustryX/).
+Adds a `JUMP` button to `jump` blocks. Click to scroll the target block into view with a flashing highlight. Ported from [MindustryX](https://github.com/TinyLake/MindustryX/). In compact mode, the block title itself shows the target mlog line number and is clickable to jump (toggle in settings).
+
+### Variable Panel Enhancement
+
+Improvements to the variables panel (`Variables` button in the logic editor):
+
+- **Auto-wrapping**: long variable names and long values wrap within the panel instead of overflowing the UI or being clipped (vanilla clips values at a fixed width/height)
+- **Adaptive rows**: row height grows with wrapped content; column widths shrink on narrow screens
+- **Click to copy**: click a variable's name to copy the name (paste it into logic input fields), or click a value to copy the displayed value — a floating "Copied" hint appears right below the cursor and fades out
 
 ### Expression Editor (`Expr` block)
 

@@ -32,10 +32,10 @@ public class ExprStatement extends LStatement{
     // 编辑框内始终是全文
     private static final int maxLines = 64;
 
-    // 断行宽度 = 积木总宽 - 对应模式的开销（dest 字段 144 + 等号 + 内边距）。
+    // 断行宽度 = 积木总宽 - 对应模式的开销（dest 字段 180 + 等号 + 内边距）。
     // 仅作首帧（Label 尚未布局）的 fallback；布局后直接用 Label 实测宽度
-    private static final float wrapOverheadRows = 200f;
-    private static final float wrapOverheadWide = 250f;
+    private static final float wrapOverheadRows = 240f;
+    private static final float wrapOverheadWide = 290f;
 
     public String dest = "result";
     public String expr = "0";
@@ -122,11 +122,12 @@ public class ExprStatement extends LStatement{
             lastWrapWidth[0] = w;
             // 断行宽度基准：Label 实测宽度（Stack 的 pref/minWidth 均覆盖为 0 后，
             // 实测宽即为 cell 分配的真实可用宽度）- 背景内边距。首帧未布局时用
-            // 结构公式估算（积木宽只可能是 Scl.scl(400/900)，DragLayout 强制）——
+            // 结构公式估算（积木宽由 DragLayout 强制为 Scl.scl(targetWidth)）——
             // 固定开销不随 UI 比例缩放，仅作 fallback
-            float sRows = Scl.scl(400f), sWide = Scl.scl(900f);
-            float blockW = Math.abs(table.getWidth() - sRows) <= Math.abs(table.getWidth() - sWide) ? sRows : sWide;
-            float fallback = Math.max(1f, blockW - (blockW == sRows ? wrapOverheadRows : wrapOverheadWide) - bgPad - 4f);
+            // 160 起积木宽度 = Scl.scl(targetWidth)：紧凑模式固定 410，宽屏模式
+            // 由 LCanvas.getTargetWidth() 动态计算（窗口宽 * 0.95 - 边距，400~1200 夹取）
+            float blockW = Scl.scl(LCanvas.isCompact() ? 410f : LCanvas.getTargetWidth());
+            float fallback = Math.max(1f, blockW - (LCanvas.isCompact() ? wrapOverheadRows : wrapOverheadWide) - bgPad - 4f);
             float wrapWidth = w > 1f ? Math.max(1f, w - bgPad) : fallback;
             if(lastError != null){
                 exprLabel.setColor(Color.scarlet);
@@ -418,6 +419,16 @@ public class ExprStatement extends LStatement{
             }catch(Exception ignored){}
         }
         return (lastOps != null) ? lastOps.size() : 1;
+    }
+
+    // 160 起 StatementElem 默认把语句装进 WrapTable（自动流式换行布局）。
+    // WrapTable 忽略 row()/colspan()/growX()，且按 cell pref 宽度排列——
+    // 本类的表达式 Stack 覆盖 getPrefWidth()=0 并靠 growX() 撑满，
+    // 在 WrapTable 中会坍缩为零宽（输入框比例崩坏、点击区域消失）。
+    // 因此退出自动换行，沿用普通 Table 的固定行布局。
+    @Override
+    public boolean useWrapping(){
+        return false;
     }
 
     @Override
