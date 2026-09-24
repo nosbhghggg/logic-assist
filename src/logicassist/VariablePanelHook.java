@@ -209,27 +209,40 @@ public class VariablePanelHook{
     }
 
     // 面板主体：布局复刻原版（左色条 | 变量名 | 色条 | 值 | 色条 | 类型），
-    // 差异点：变量名/值自动换行、行高随内容撑开、列宽随屏幕宽度自适应
+    // 差异点：变量名/值自动换行、行高随内容撑开、列宽随屏幕宽度自适应。
+    // 窄屏（手机竖屏）单行放不下时自动切换两行布局：
+    // 第一行 = 变量名 + 类型，第二行 = 值占满整行，避免横向滚动挤出类型列
     private static void buildPanel(Table p, LExecutor executor){
         p.margin(10f).marginRight(16f);
         p.table(Tex.button, t -> {
             // 行高仅作最小值：单行时保持原版观感，换行后自动撑开
             t.defaults().fillX().minHeight(45f);
 
-            // 列宽上限：随屏幕宽度收缩，物理像素 = UI 缩放后的基准值与屏幕占比取小
-            float nameCol = Math.min(Scl.scl(340f), Core.graphics.getWidth() * 0.28f);
-            float valCol = Math.min(Scl.scl(560f), Core.graphics.getWidth() * 0.45f);
+            float screenW = Core.graphics.getWidth();
             float stub = 8f, mul = 0.5f, pad = 4;
+
+            // 单行布局列宽上限：随屏幕宽度收缩
+            float nameCol = Math.min(Scl.scl(340f), screenW * 0.28f);
+            float valCol = Math.min(Scl.scl(560f), screenW * 0.45f);
+            // 估算单行总宽（类型列按 minWidth 估，高 UI 缩放下实际更宽），
+            // 超出可视宽度则用两行布局
+            float singleRowMin = Scl.scl(50f) + nameCol + valCol + Scl.scl(120f);
+            boolean narrow = singleRowMin > screenW - Scl.scl(24f);
+
+            // 窄屏两行布局的列宽：第一行 = 名(55%) + 类型自适应；第二行 = 值占满
+            float narrowRowW = Math.min(screenW, Scl.scl(720f)) - Scl.scl(60f);
+            float narrowNameCol = narrowRowW * 0.55f;
+            float narrowValCol = narrowRowW - Scl.scl(24f);
 
             for(var s : executor.vars){
                 if(s.constant) continue;
 
                 Color varColor = Pal.gray;
 
+                // 色条（变量名左侧）
                 t.add(new Image(Tex.whiteui, varColor.cpy().mul(mul))).width(stub).fillY();
 
-                // 变量名：限定宽度 + 自动换行（原版无宽度限制导致长名溢出）；
-                // 点击复制变量名（可直接粘贴到逻辑输入框引用该变量）
+                // 变量名：限定宽度 + 自动换行；点击复制变量名
                 Label nameLabel = new Label(" " + s.name + " ", Styles.outlineLabel);
                 nameLabel.setColor(Pal.accent);
                 nameLabel.setWrap(true);
@@ -240,54 +253,76 @@ public class VariablePanelHook{
                     }
                 });
                 t.stack(new Image(Tex.whiteui, varColor), nameLabel)
-                    .width(nameCol).fillY().padRight(pad);
+                    .width(narrow ? narrowNameCol : nameCol).fillY().padRight(pad);
 
-                t.add(new Image(Tex.whiteui, Pal.gray.cpy().mul(mul))).width(stub).fillY();
+                if(narrow){
+                    // 第一行右侧直接放类型（类型列无固定下限，自适应文本宽度）
+                    addTypeCell(t, s, mul);
+                    t.row();
 
-                // 值：加宽 + 自动换行；行高不锁死，长内容完整显示
-                t.table(Tex.pane, out -> {
-                    float period = 15f;
-                    float[] counter = {-1f};
-                    Label label = out.add("").style(Styles.outlineLabel)
-                        .padLeft(4).padRight(4).width(valCol).wrap().get();
-                    label.update(() -> {
-                        if(counter[0] < 0 || (counter[0] += Time.delta) >= period){
-                            String text = s.isobj ? PrintI.toString(s.objval)
-                                : Math.abs(s.numval - Math.round(s.numval)) < 0.00001
-                                ? Math.round(s.numval) + "" : s.numval + "";
-                            if(!label.textEquals(text)){
-                                label.setText(text);
-                                if(counter[0] >= 0f){
-                                    label.actions(Actions.color(Pal.accent), Actions.color(Color.white, 0.2f));
-                                }
-                            }
-                            counter[0] = 0f;
-                        }
-                    });
-                    label.act(1f);
-                    // 点击复制当前显示的值（刷新周期内文本即最新值）
-                    label.addListener(new ClickListener(){
-                        @Override
-                        public void clicked(InputEvent event, float x, float y){
-                            copyWithFeedback(label.getText().toString(), event.stageX, event.stageY);
-                        }
-                    });
-                }).fillY().padRight(pad);
+                    // 第二行：值占满整行
+                    t.add(new Image(Tex.whiteui, Pal.gray.cpy().mul(mul))).width(stub).fillY();
+                    addValueCell(t, s, narrowValCol).colspan(3).growX().padRight(pad);
+                    t.row();
 
-                t.add(new Image(Tex.whiteui, LogicDialog.typeColor(s, new Color()).mul(mul)))
-                    .update(i -> i.setColor(LogicDialog.typeColor(s, i.color).mul(mul)))
-                    .width(stub).fillY();
+                    t.add().growX().colspan(4).height(4).row();
+                }else{
+                    t.add(new Image(Tex.whiteui, Pal.gray.cpy().mul(mul))).width(stub).fillY();
 
-                t.stack(new Image(Tex.whiteui, LogicDialog.typeColor(s, new Color())){{
-                    update(() -> setColor(LogicDialog.typeColor(s, color)));
-                }}, new Label(() -> " " + LogicDialog.typeName(s) + " "){{
-                    setStyle(Styles.outlineLabel);
-                }}).minWidth(120f).fillY();
+                    addValueCell(t, s, valCol).fillY().padRight(pad);
 
-                t.row();
+                    addTypeCell(t, s, mul);
 
-                t.add().growX().colspan(6).height(4).row();
+                    t.row();
+
+                    t.add().growX().colspan(6).height(4).row();
+                }
             }
         });
+    }
+
+    // 值单元格：Pane 背景 + 自动换行 + 周期刷新 + 点击复制
+    private static Cell<?> addValueCell(Table t, LVar s, float valCol){
+        return t.table(Tex.pane, out -> {
+            float period = 15f;
+            float[] counter = {-1f};
+            Label label = out.add("").style(Styles.outlineLabel)
+                .padLeft(4).padRight(4).width(valCol).wrap().get();
+            label.update(() -> {
+                if(counter[0] < 0 || (counter[0] += Time.delta) >= period){
+                    String text = s.isobj ? PrintI.toString(s.objval)
+                        : Math.abs(s.numval - Math.round(s.numval)) < 0.00001
+                        ? Math.round(s.numval) + "" : s.numval + "";
+                    if(!label.textEquals(text)){
+                        label.setText(text);
+                        if(counter[0] >= 0f){
+                            label.actions(Actions.color(Pal.accent), Actions.color(Color.white, 0.2f));
+                        }
+                    }
+                    counter[0] = 0f;
+                }
+            });
+            label.act(1f);
+            // 点击复制当前显示的值（刷新周期内文本即最新值）
+            label.addListener(new ClickListener(){
+                @Override
+                public void clicked(InputEvent event, float x, float y){
+                    copyWithFeedback(label.getText().toString(), event.stageX, event.stageY);
+                }
+            });
+        });
+    }
+
+    // 类型单元格：色条 + 类型文本（宽度自适应，不设固定下限）
+    private static void addTypeCell(Table t, LVar s, float mul){
+        t.add(new Image(Tex.whiteui, LogicDialog.typeColor(s, new Color()).mul(mul)))
+            .update(i -> i.setColor(LogicDialog.typeColor(s, i.color).mul(mul)))
+            .width(8f).fillY();
+
+        t.stack(new Image(Tex.whiteui, LogicDialog.typeColor(s, new Color())){{
+            update(() -> setColor(LogicDialog.typeColor(s, color)));
+        }}, new Label(() -> " " + LogicDialog.typeName(s) + " "){{
+            setStyle(Styles.outlineLabel);
+        }}).fillY();
     }
 }
