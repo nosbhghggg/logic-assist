@@ -16,6 +16,10 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    env:
+      # runner 镜像预装 Android SDK；android-actions/setup-android@v3 因内部
+      # 安装已废弃的 "tools" 包而永久失败，改用预装 SDK + 手动装组件
+      ANDROID_HOME: /usr/local/lib/android/sdk
     steps:
       - uses: actions/checkout@v4
         with:
@@ -26,10 +30,11 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
 
-      - uses: android-actions/setup-android@v3
-
       - name: Install Android SDK components
-        run: sdkmanager --install "platforms;android-34" "build-tools;34.0.0"
+        run: |
+          SDKMANAGER=$(ls "$ANDROID_HOME"/cmdline-tools/*/bin/sdkmanager | head -1)
+          yes | "$SDKMANAGER" --licenses > /dev/null 2>&1 || true
+          "$SDKMANAGER" --install "platforms;android-34" "build-tools;34.0.0"
 
       - name: Build universal JAR
         run: chmod +x gradlew && ./gradlew deploy
